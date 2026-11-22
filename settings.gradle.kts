@@ -13,4 +13,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "FamilyGPSApp"
-include(":app")
+include(":familgpsapp")
