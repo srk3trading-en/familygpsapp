@@ -57,7 +57,6 @@ class MainActivity : AppCompatActivity() {
         val btnStartTracking = findViewById<Button>(R.id.btnStartTracking)
         val btnStopTracking = findViewById<Button>(R.id.btnStopTracking)
 
-        // Request runtime permissions
         ActivityCompat.requestPermissions(
             this,
             arrayOf(
@@ -68,11 +67,10 @@ class MainActivity : AppCompatActivity() {
             100
         )
 
-        // Generate initial local token on device for SRK 3 Trading GPS System
         generatedToken = generateLocalToken(etDeviceId.text.toString())
         tvReceivedToken.text = generatedToken
 
-        // Default mode UI
+        val initialLabel = resolveDisplayLabel(etDeviceId.text.toString())
         setDisconnectedState(
             statusBanner = statusBanner,
             tvGpsStatus = tvGpsStatus,
@@ -80,26 +78,30 @@ class MainActivity : AppCompatActivity() {
             tvSelectedMode = tvSelectedMode,
             tvTokenLogInfo = tvTokenLogInfo,
             tvStayAndDirection = tvStayAndDirection,
-            detailText = "SRK 3 Trading GPS System | Stopped - Token Required"
+            detailText = "$initialLabel | Disconnected - Token Required"
         )
         updateBatteryAndInfo(tvBatteryInfo, tvStayAndDirection)
 
-        // Mode selection buttons
         btnModeOffice.setOnClickListener {
             selectedMode = "Office"
             tvSelectedMode.text = "Mode: Office"
             btnModeOffice.setBackgroundColor(Color.parseColor("#1565C0"))
             btnModeFamily.setBackgroundColor(Color.parseColor("#757575"))
+            val label = resolveDisplayLabel(etDeviceId.text.toString())
+            tvStatusDetail.text = "$label | SRK 3 Trading GPS System"
+            updateBatteryAndInfo(tvBatteryInfo, tvStayAndDirection)
         }
 
         btnModeFamily.setOnClickListener {
             selectedMode = "Family"
-            tvSelectedMode.text = "Mode: Family"
+            tvSelectedMode.text = "Mode: Home Family"
             btnModeFamily.setBackgroundColor(Color.parseColor("#1565C0"))
             btnModeOffice.setBackgroundColor(Color.parseColor("#757575"))
+            val label = resolveDisplayLabel(etDeviceId.text.toString())
+            tvStatusDetail.text = "$label | SRK 3 Trading GPS System"
+            updateBatteryAndInfo(tvBatteryInfo, tvStayAndDirection)
         }
 
-        // Generate fresh local token when tapping received token box
         tvReceivedToken.setOnClickListener {
             if (isTokenActivated) {
                 Toast.makeText(
@@ -114,7 +116,6 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "New SRK 3 Trading local token generated", Toast.LENGTH_SHORT).show()
         }
 
-        // Paste token from local generated token box or system clipboard
         btnPasteToken.setOnClickListener {
             if (isTokenActivated) {
                 Toast.makeText(this, "Token already active. Disconnect to generate a new one", Toast.LENGTH_SHORT).show()
@@ -144,7 +145,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Activate single-use token, clear input box, and show GPS symbol
         btnVerifyToken.setOnClickListener {
             val tokenValue = etToken.text.toString().trim()
             if (tokenValue.isEmpty()) {
@@ -160,28 +160,32 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
 
-            // Consume token so it cannot be reused
             usedTokens.add(tokenValue)
             activeToken = tokenValue
             isTokenActivated = true
             generatedToken = ""
 
-            // Clear token input & received token box after activation
             etToken.text.clear()
             tvReceivedToken.text = "SRK 3 Trading Active Session Token Locked"
 
             val currentTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+            val label = resolveDisplayLabel(etDeviceId.text.toString())
             statusBanner.setBackgroundColor(Color.parseColor("#2E7D32"))
             tvGpsStatus.text = "📍 GPS: CONNECTED & ACTIVE"
-            tvStatusDetail.text = "SRK 3 Trading GPS System | Token Active ($selectedMode)"
+            tvStatusDetail.text = "$label | Token Active"
             tvTokenLogInfo.text = "Token Audit: Single-use token activated at $currentTime"
             tvLastSync.text = "Last Sync: $currentTime"
             Toast.makeText(this, "Token activated and locked for single use", Toast.LENGTH_SHORT).show()
         }
 
-        // Start tracking service
         btnStartTracking.setOnClickListener {
-            val userName = etDeviceId.text.toString().trim().ifEmpty { "Shahid Farooqui" }
+            val rawInput = etDeviceId.text.toString().trim()
+            val userName = if (rawInput.isEmpty()) "Muhammad Shahid Farooqui" else rawInput
+            val isHomeFamily = selectedMode == "Family" ||
+                rawInput.contains("home", ignoreCase = true) ||
+                rawInput.contains("family", ignoreCase = true)
+            val effectiveMode = if (isHomeFamily) "Home Family" else "Office"
+            val displayLabel = resolveDisplayLabel(rawInput)
             val currentTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
 
             if (!isTokenActivated || activeToken.isNullOrBlank()) {
@@ -198,7 +202,7 @@ class MainActivity : AppCompatActivity() {
             val serviceIntent = Intent(this, LocationService::class.java).apply {
                 putExtra("DEVICE_ID", userName)
                 putExtra("SYSTEM_NAME", "SRK 3 Trading GPS System")
-                putExtra("TRACKING_MODE", selectedMode)
+                putExtra("TRACKING_MODE", effectiveMode)
                 putExtra("TOKEN", activeToken)
             }
 
@@ -210,24 +214,22 @@ class MainActivity : AppCompatActivity() {
 
             statusBanner.setBackgroundColor(Color.parseColor("#2E7D32"))
             tvGpsStatus.text = "🛰️ GPS: CONNECTED & TRACKING"
-            tvStatusDetail.text = "SRK 3 Trading GPS System | $userName ($selectedMode)"
+            tvStatusDetail.text = displayLabel
             tvLastSync.text = "Last Sync: $currentTime"
             updateBatteryAndInfo(tvBatteryInfo, tvStayAndDirection)
         }
 
-        // Disconnect / stop tracking: remove old token and generate a fresh one
         btnStopTracking.setOnClickListener {
             stopService(Intent(this, LocationService::class.java))
 
-            // Remove current active token completely
             activeToken = null
             isTokenActivated = false
             etToken.text.clear()
 
-            // Generate a new token ready for the next connection
             generatedToken = generateLocalToken(etDeviceId.text.toString())
             tvReceivedToken.text = generatedToken
 
+            val label = resolveDisplayLabel(etDeviceId.text.toString())
             setDisconnectedState(
                 statusBanner = statusBanner,
                 tvGpsStatus = tvGpsStatus,
@@ -235,19 +237,35 @@ class MainActivity : AppCompatActivity() {
                 tvSelectedMode = tvSelectedMode,
                 tvTokenLogInfo = tvTokenLogInfo,
                 tvStayAndDirection = tvStayAndDirection,
-                detailText = "SRK 3 Trading GPS System | Disconnected - New Token Ready"
+                detailText = "$label | Disconnected - New Token Ready"
             )
             Toast.makeText(this, "Disconnected. Old token removed and new token generated.", Toast.LENGTH_SHORT).show()
         }
     }
 
+    private fun resolveDisplayLabel(rawInput: String): String {
+        val cleanedInput = rawInput.trim()
+        val isHomeFamily = selectedMode == "Family" ||
+            cleanedInput.contains("home", ignoreCase = true) ||
+            cleanedInput.contains("family", ignoreCase = true)
+
+        val personName = cleanedInput
+            .replace(Regex("\\b(home|family|office)\\b", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .ifEmpty { "Muhammad Shahid Farooqui" }
+
+        val areaLabel = if (isHomeFamily) "Home Family" else "Office"
+        return "$personName - $areaLabel"
+    }
+
     private fun generateLocalToken(rawUserId: String): String {
         val cleanId = rawUserId.trim()
-            .ifEmpty { "ShahidFarooqui" }
+            .ifEmpty { "MuhammadShahidFarooqui" }
             .replace(Regex("[^A-Za-z0-9]"), "")
             .take(10)
             .uppercase(Locale.getDefault())
-            .ifEmpty { "SHAHIDFAROOQUI" }
+            .ifEmpty { "MSFAROOQUI" }
 
         val timePart = SimpleDateFormat("HHmmss", Locale.getDefault()).format(Date())
         var candidate: String
@@ -271,7 +289,7 @@ class MainActivity : AppCompatActivity() {
         statusBanner.setBackgroundColor(Color.parseColor("#D32F2F"))
         tvGpsStatus.text = "🚫📡 GPS: DISCONNECTED"
         tvStatusDetail.text = detailText
-        tvSelectedMode.text = "Mode: $selectedMode"
+        tvSelectedMode.text = if (selectedMode == "Family") "Mode: Home Family" else "Mode: Office"
         tvTokenLogInfo.text = "Token Audit: Ready for fresh SRK 3 Trading local token"
         tvStayAndDirection.text = "Direction / Route: Stopped | Dwell Time: 0m"
     }
@@ -280,7 +298,8 @@ class MainActivity : AppCompatActivity() {
         val bm = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
         val level = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
         val batteryText = if (level in 0..100) "$level%" else "--%"
+        val modeLabel = if (selectedMode == "Family") "Home Family" else "Office"
         tvBattery.text = "Battery: $batteryText | Stay Log: Active"
-        tvStay.text = "Direction / Route: Monitoring ($selectedMode) | Dwell Time: 0m"
+        tvStay.text = "Direction / Route: Monitoring ($modeLabel) | Dwell Time: 0m"
     }
 }
