@@ -1,4 +1,7 @@
-package com.srk3trading.gps // نوٹ: اگر باقی فائلیں com.sajidalam.familygps میں ہیں تو اسے وہی رکھیں اور نیچے import com.sajidalam.familygps.R شامل کر لیں
+package com.sajidalam.familygps
+
+import com.sajidalam.familygps.R
+import com.sajidalam.familygps.LocationService
 
 import android.Manifest
 import android.content.ClipboardManager
@@ -65,7 +68,7 @@ class MainActivity : AppCompatActivity() {
             100
         )
 
-        // Generate initial local token on device for SRK3 Trading GPS System
+        // Generate initial local token on device for SRK 3 Trading GPS System
         generatedToken = generateLocalToken(etDeviceId.text.toString())
         tvReceivedToken.text = generatedToken
 
@@ -77,7 +80,7 @@ class MainActivity : AppCompatActivity() {
             tvSelectedMode = tvSelectedMode,
             tvTokenLogInfo = tvTokenLogInfo,
             tvStayAndDirection = tvStayAndDirection,
-            detailText = "SRK3 Trading GPS System | Stopped - Token Required"
+            detailText = "SRK 3 Trading GPS System | Stopped - Token Required"
         )
         updateBatteryAndInfo(tvBatteryInfo, tvStayAndDirection)
 
@@ -108,7 +111,7 @@ class MainActivity : AppCompatActivity() {
             }
             generatedToken = generateLocalToken(etDeviceId.text.toString())
             tvReceivedToken.text = generatedToken
-            Toast.makeText(this, "New SRK3 local token generated", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "New SRK 3 Trading local token generated", Toast.LENGTH_SHORT).show()
         }
 
         // Paste token from local generated token box or system clipboard
@@ -165,12 +168,12 @@ class MainActivity : AppCompatActivity() {
 
             // Clear token input & received token box after activation
             etToken.text.clear()
-            tvReceivedToken.text = "SRK3 Active Session Token Locked"
+            tvReceivedToken.text = "SRK 3 Trading Active Session Token Locked"
 
             val currentTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
             statusBanner.setBackgroundColor(Color.parseColor("#2E7D32"))
             tvGpsStatus.text = "📍 GPS: CONNECTED & ACTIVE"
-            tvStatusDetail.text = "SRK3 Trading GPS System | Token Active ($selectedMode)"
+            tvStatusDetail.text = "SRK 3 Trading GPS System | Token Active ($selectedMode)"
             tvTokenLogInfo.text = "Token Audit: Single-use token activated at $currentTime"
             tvLastSync.text = "Last Sync: $currentTime"
             Toast.makeText(this, "Token activated and locked for single use", Toast.LENGTH_SHORT).show()
@@ -188,13 +191,13 @@ class MainActivity : AppCompatActivity() {
                 isTokenActivated = true
                 generatedToken = ""
                 etToken.text.clear()
-                tvReceivedToken.text = "SRK3 Active Session Token Locked"
+                tvReceivedToken.text = "SRK 3 Trading Active Session Token Locked"
                 tvTokenLogInfo.text = "Token Audit: Auto-activated at $currentTime"
             }
 
             val serviceIntent = Intent(this, LocationService::class.java).apply {
                 putExtra("DEVICE_ID", userName)
-                putExtra("SYSTEM_NAME", "SRK3 Trading GPS System")
+                putExtra("SYSTEM_NAME", "SRK 3 Trading GPS System")
                 putExtra("TRACKING_MODE", selectedMode)
                 putExtra("TOKEN", activeToken)
             }
@@ -207,7 +210,7 @@ class MainActivity : AppCompatActivity() {
 
             statusBanner.setBackgroundColor(Color.parseColor("#2E7D32"))
             tvGpsStatus.text = "🛰️ GPS: CONNECTED & TRACKING"
-            tvStatusDetail.text = "SRK3 Trading GPS System | $userName ($selectedMode)"
+            tvStatusDetail.text = "SRK 3 Trading GPS System | $userName ($selectedMode)"
             tvLastSync.text = "Last Sync: $currentTime"
             updateBatteryAndInfo(tvBatteryInfo, tvStayAndDirection)
         }
@@ -232,7 +235,7 @@ class MainActivity : AppCompatActivity() {
                 tvSelectedMode = tvSelectedMode,
                 tvTokenLogInfo = tvTokenLogInfo,
                 tvStayAndDirection = tvStayAndDirection,
-                detailText = "SRK3 Trading GPS System | Disconnected - New Token Ready"
+                detailText = "SRK 3 Trading GPS System | Disconnected - New Token Ready"
             )
             Toast.makeText(this, "Disconnected. Old token removed and new token generated.", Toast.LENGTH_SHORT).show()
         }
@@ -269,7 +272,7 @@ class MainActivity : AppCompatActivity() {
         tvGpsStatus.text = "🚫📡 GPS: DISCONNECTED"
         tvStatusDetail.text = detailText
         tvSelectedMode.text = "Mode: $selectedMode"
-        tvTokenLogInfo.text = "Token Audit: Ready for fresh SRK3 local token"
+        tvTokenLogInfo.text = "Token Audit: Ready for fresh SRK 3 Trading local token"
         tvStayAndDirection.text = "Direction / Route: Stopped | Dwell Time: 0m"
     }
 
