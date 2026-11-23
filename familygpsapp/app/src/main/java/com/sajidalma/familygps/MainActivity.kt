@@ -15,7 +15,6 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import java.text.SimpleDateFormat
@@ -67,10 +66,8 @@ class MainActivity : AppCompatActivity() {
             100
         )
 
-        generatedToken = generateLocalToken(etDeviceId.text.toString())
-        tvReceivedToken.text = generatedToken
+        tvReceivedToken.text = "Enter ID first to generate token"
 
-        val initialLabel = resolveDisplayLabel(etDeviceId.text.toString())
         setDisconnectedState(
             statusBanner = statusBanner,
             tvGpsStatus = tvGpsStatus,
@@ -78,7 +75,7 @@ class MainActivity : AppCompatActivity() {
             tvSelectedMode = tvSelectedMode,
             tvTokenLogInfo = tvTokenLogInfo,
             tvStayAndDirection = tvStayAndDirection,
-            detailText = "$initialLabel | Disconnected - Token Required"
+            detailText = "SRK 3 Trading GPS System | Please enter the ID"
         )
         updateBatteryAndInfo(tvBatteryInfo, tvStayAndDirection)
 
@@ -87,8 +84,10 @@ class MainActivity : AppCompatActivity() {
             tvSelectedMode.text = "Mode: Office"
             btnModeOffice.setBackgroundColor(Color.parseColor("#1565C0"))
             btnModeFamily.setBackgroundColor(Color.parseColor("#757575"))
-            val label = resolveDisplayLabel(etDeviceId.text.toString())
-            tvStatusDetail.text = "$label | SRK 3 Trading GPS System"
+            val rawId = etDeviceId.text.toString().trim()
+            if (rawId.isNotEmpty()) {
+                tvStatusDetail.text = "${resolveDisplayLabel(rawId)} | SRK 3 Trading GPS System"
+            }
             updateBatteryAndInfo(tvBatteryInfo, tvStayAndDirection)
         }
 
@@ -97,66 +96,79 @@ class MainActivity : AppCompatActivity() {
             tvSelectedMode.text = "Mode: Home Family"
             btnModeFamily.setBackgroundColor(Color.parseColor("#1565C0"))
             btnModeOffice.setBackgroundColor(Color.parseColor("#757575"))
-            val label = resolveDisplayLabel(etDeviceId.text.toString())
-            tvStatusDetail.text = "$label | SRK 3 Trading GPS System"
+            val rawId = etDeviceId.text.toString().trim()
+            if (rawId.isNotEmpty()) {
+                tvStatusDetail.text = "${resolveDisplayLabel(rawId)} | SRK 3 Trading GPS System"
+            }
             updateBatteryAndInfo(tvBatteryInfo, tvStayAndDirection)
         }
 
         tvReceivedToken.setOnClickListener {
-            if (isTokenActivated) {
-                Toast.makeText(
-                    this,
-                    "Disconnect first to remove current token and generate a new one",
-                    Toast.LENGTH_SHORT
-                ).show()
+            val rawId = etDeviceId.text.toString().trim()
+            if (!requireDeviceId(etDeviceId, tvStatusDetail, tvTokenLogInfo)) {
                 return@setOnClickListener
             }
-            generatedToken = generateLocalToken(etDeviceId.text.toString())
+            if (isTokenActivated) {
+                tvTokenLogInfo.text = "Token Audit: Disconnect first to generate a new token"
+                return@setOnClickListener
+            }
+            generatedToken = generateLocalToken(rawId)
             tvReceivedToken.text = generatedToken
-            Toast.makeText(this, "New SRK 3 Trading local token generated", Toast.LENGTH_SHORT).show()
+            tvTokenLogInfo.text = "Token Audit: New SRK 3 Trading local token ready"
         }
 
         btnPasteToken.setOnClickListener {
+            val rawId = etDeviceId.text.toString().trim()
+            if (!requireDeviceId(etDeviceId, tvStatusDetail, tvTokenLogInfo)) {
+                return@setOnClickListener
+            }
             if (isTokenActivated) {
-                Toast.makeText(this, "Token already active. Disconnect to generate a new one", Toast.LENGTH_SHORT).show()
+                tvTokenLogInfo.text = "Token Audit: Token already active. Disconnect to reset"
                 return@setOnClickListener
             }
 
             if (generatedToken.isBlank()) {
-                generatedToken = generateLocalToken(etDeviceId.text.toString())
+                generatedToken = generateLocalToken(rawId)
             }
 
             if (!usedTokens.contains(generatedToken)) {
                 tvReceivedToken.text = generatedToken
                 etToken.setText(generatedToken)
-                Toast.makeText(this, "Local token pasted", Toast.LENGTH_SHORT).show()
+                tvTokenLogInfo.text = "Token Audit: Local token pasted"
             } else {
                 val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 val clipText = clipboard.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString()?.trim()
                 if (!clipText.isNullOrEmpty() && !usedTokens.contains(clipText)) {
                     etToken.setText(clipText)
-                    Toast.makeText(this, "Clipboard token pasted", Toast.LENGTH_SHORT).show()
+                    tvTokenLogInfo.text = "Token Audit: Clipboard token pasted"
                 } else {
-                    generatedToken = generateLocalToken(etDeviceId.text.toString())
+                    generatedToken = generateLocalToken(rawId)
                     tvReceivedToken.text = generatedToken
                     etToken.setText(generatedToken)
-                    Toast.makeText(this, "Fresh single-use token generated & pasted", Toast.LENGTH_SHORT).show()
+                    tvTokenLogInfo.text = "Token Audit: Fresh single-use token generated & pasted"
                 }
             }
         }
 
         btnVerifyToken.setOnClickListener {
-            val tokenValue = etToken.text.toString().trim()
-            if (tokenValue.isEmpty()) {
-                Toast.makeText(this, "Please enter or paste a token", Toast.LENGTH_SHORT).show()
+            val rawId = etDeviceId.text.toString().trim()
+            if (!requireDeviceId(etDeviceId, tvStatusDetail, tvTokenLogInfo)) {
                 return@setOnClickListener
             }
 
+            val tokenValue = etToken.text.toString().trim()
+            if (tokenValue.isEmpty()) {
+                etToken.error = "Enter or paste token"
+                tvTokenLogInfo.text = "Token Audit: Please enter or paste a token"
+                return@setOnClickListener
+            }
+            etToken.error = null
+
             if (usedTokens.contains(tokenValue)) {
                 etToken.text.clear()
-                Toast.makeText(this, "This token was already used. Generating a new token...", Toast.LENGTH_SHORT).show()
-                generatedToken = generateLocalToken(etDeviceId.text.toString())
+                generatedToken = generateLocalToken(rawId)
                 tvReceivedToken.text = generatedToken
+                tvTokenLogInfo.text = "Token Audit: Already used. New token generated"
                 return@setOnClickListener
             }
 
@@ -169,27 +181,29 @@ class MainActivity : AppCompatActivity() {
             tvReceivedToken.text = "SRK 3 Trading Active Session Token Locked"
 
             val currentTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-            val label = resolveDisplayLabel(etDeviceId.text.toString())
+            val label = resolveDisplayLabel(rawId)
             statusBanner.setBackgroundColor(Color.parseColor("#2E7D32"))
             tvGpsStatus.text = "📍 GPS: CONNECTED & ACTIVE"
             tvStatusDetail.text = "$label | Token Active"
-            tvTokenLogInfo.text = "Token Audit: Single-use token activated at $currentTime"
+            tvTokenLogInfo.text = "Token Audit: Activated at $currentTime (Single-use)"
             tvLastSync.text = "Last Sync: $currentTime"
-            Toast.makeText(this, "Token activated and locked for single use", Toast.LENGTH_SHORT).show()
         }
 
         btnStartTracking.setOnClickListener {
-            val rawInput = etDeviceId.text.toString().trim()
-            val userName = if (rawInput.isEmpty()) "Muhammad Shahid Farooqui" else rawInput
+            val rawId = etDeviceId.text.toString().trim()
+            if (!requireDeviceId(etDeviceId, tvStatusDetail, tvTokenLogInfo)) {
+                return@setOnClickListener
+            }
+
             val isHomeFamily = selectedMode == "Family" ||
-                rawInput.contains("home", ignoreCase = true) ||
-                rawInput.contains("family", ignoreCase = true)
+                rawId.contains("home", ignoreCase = true) ||
+                rawId.contains("family", ignoreCase = true)
             val effectiveMode = if (isHomeFamily) "Home Family" else "Office"
-            val displayLabel = resolveDisplayLabel(rawInput)
+            val displayLabel = resolveDisplayLabel(rawId)
             val currentTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
 
             if (!isTokenActivated || activeToken.isNullOrBlank()) {
-                val freshToken = generateLocalToken(userName)
+                val freshToken = generateLocalToken(rawId)
                 usedTokens.add(freshToken)
                 activeToken = freshToken
                 isTokenActivated = true
@@ -200,7 +214,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             val serviceIntent = Intent(this, LocationService::class.java).apply {
-                putExtra("DEVICE_ID", userName)
+                putExtra("DEVICE_ID", rawId)
                 putExtra("SYSTEM_NAME", "SRK 3 Trading GPS System")
                 putExtra("TRACKING_MODE", effectiveMode)
                 putExtra("TOKEN", activeToken)
@@ -226,10 +240,21 @@ class MainActivity : AppCompatActivity() {
             isTokenActivated = false
             etToken.text.clear()
 
-            generatedToken = generateLocalToken(etDeviceId.text.toString())
-            tvReceivedToken.text = generatedToken
+            val rawId = etDeviceId.text.toString().trim()
+            if (rawId.isNotEmpty()) {
+                generatedToken = generateLocalToken(rawId)
+                tvReceivedToken.text = generatedToken
+            } else {
+                generatedToken = ""
+                tvReceivedToken.text = "Enter ID first to generate token"
+            }
 
-            val label = resolveDisplayLabel(etDeviceId.text.toString())
+            val detailText = if (rawId.isNotEmpty()) {
+                "${resolveDisplayLabel(rawId)} | Disconnected - New Token Ready"
+            } else {
+                "SRK 3 Trading GPS System | Please enter the ID"
+            }
+
             setDisconnectedState(
                 statusBanner = statusBanner,
                 tvGpsStatus = tvGpsStatus,
@@ -237,10 +262,26 @@ class MainActivity : AppCompatActivity() {
                 tvSelectedMode = tvSelectedMode,
                 tvTokenLogInfo = tvTokenLogInfo,
                 tvStayAndDirection = tvStayAndDirection,
-                detailText = "$label | Disconnected - New Token Ready"
+                detailText = detailText
             )
-            Toast.makeText(this, "Disconnected. Old token removed and new token generated.", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun requireDeviceId(
+        etDeviceId: EditText,
+        tvStatusDetail: TextView,
+        tvTokenLogInfo: TextView
+    ): Boolean {
+        val rawId = etDeviceId.text.toString().trim()
+        if (rawId.isEmpty()) {
+            etDeviceId.error = "Please enter the ID"
+            etDeviceId.requestFocus()
+            tvStatusDetail.text = "SRK 3 Trading GPS System | Please enter the ID"
+            tvTokenLogInfo.text = "Token Audit: Device / User ID is required"
+            return false
+        }
+        etDeviceId.error = null
+        return true
     }
 
     private fun resolveDisplayLabel(rawInput: String): String {
@@ -253,7 +294,7 @@ class MainActivity : AppCompatActivity() {
             .replace(Regex("\\b(home|family|office)\\b", RegexOption.IGNORE_CASE), "")
             .replace(Regex("\\s+"), " ")
             .trim()
-            .ifEmpty { "Muhammad Shahid Farooqui" }
+            .ifEmpty { cleanedInput }
 
         val areaLabel = if (isHomeFamily) "Home Family" else "Office"
         return "$personName - $areaLabel"
@@ -261,11 +302,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun generateLocalToken(rawUserId: String): String {
         val cleanId = rawUserId.trim()
-            .ifEmpty { "MuhammadShahidFarooqui" }
             .replace(Regex("[^A-Za-z0-9]"), "")
             .take(10)
             .uppercase(Locale.getDefault())
-            .ifEmpty { "MSFAROOQUI" }
+            .ifEmpty { "USERID" }
 
         val timePart = SimpleDateFormat("HHmmss", Locale.getDefault()).format(Date())
         var candidate: String
