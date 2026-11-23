@@ -23,7 +23,8 @@
 
         <service
             android:name=".LocationService"
-            android:exported="false" />
+            android:exported="false"
+            android:foregroundServiceType="location" />
 
     </application>
 
