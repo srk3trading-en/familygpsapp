@@ -475,8 +475,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (isInternetAvailable) {
-            flushOfflineQueue()
-            tvLastSync?.text = "Last Sync: $nowTime"
+            val flushed = flushOfflineQueue()
+            tvLastSync?.text = if (flushed > 0) {
+                "Last Sync: $nowTime ($flushed synced)"
+            } else {
+                "Last Sync: $nowTime"
+            }
         } else {
             enqueueOfflineRecord(record)
         }
@@ -913,7 +917,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateBatteryAndInfo(tvBattery: TextView, tvStay: TextView) {
-        val level = getBatteryPercentage()
+        val bm = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+        val level = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
         val batteryText = if (level in 0..100) "$level%" else "--%"
         val modeName = activeSessionMode ?: selectedMode
         tvBattery.text = "Battery: $batteryText | Stay Log: Active"
