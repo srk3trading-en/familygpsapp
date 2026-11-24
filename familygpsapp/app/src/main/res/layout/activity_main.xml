@@ -10,48 +10,86 @@
         android:layout_height="wrap_content"
         android:orientation="vertical">
 
+        <!-- Status Banner + Live Radar & Arrow Indicator -->
         <LinearLayout
             android:id="@+id/statusBanner"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginBottom="14dp"
             android:background="#D32F2F"
-            android:orientation="vertical"
-            android:padding="16dp"
-            android:layout_marginBottom="14dp">
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:padding="16dp">
 
-            <TextView
-                android:id="@+id/tvGpsStatus"
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:text="GPS: DISCONNECTED"
-                android:textColor="#FFFFFF"
-                android:textSize="18sp"
-                android:textStyle="bold" />
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:paddingEnd="10dp">
 
-            <TextView
-                android:id="@+id/tvStatusDetail"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Status: Stopped - Token Required"
-                android:textColor="#FFEBEE"
-                android:textSize="13sp"
-                android:layout_marginTop="4dp" />
+                <TextView
+                    android:id="@+id/tvGpsStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:maxLines="2"
+                    android:text="GPS: DISCONNECTED"
+                    android:textColor="#FFFFFF"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvStatusDetail"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:maxLines="2"
+                    android:text="Status: Stopped - Token Required"
+                    android:textColor="#FFEBEE"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <!-- Radar Pulse Ring + Arrow Icon Container -->
+            <FrameLayout
+                android:layout_width="64dp"
+                android:layout_height="64dp"
+                android:clipChildren="false"
+                android:clipToPadding="false">
+
+                <View
+                    android:id="@+id/ivRadarSignal"
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
+                    android:layout_gravity="center"
+                    android:alpha="0.0"
+                    android:background="@drawable/bg_radar_ring"
+                    android:visibility="invisible" />
+
+                <ImageView
+                    android:id="@+id/ivArrowIcon"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
+                    android:layout_gravity="center"
+                    android:contentDescription="Signal Status Icon"
+                    android:src="@drawable/ic_signal_arrow" />
+            </FrameLayout>
         </LinearLayout>
 
+        <!-- Mode Selection Card -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="#FFFFFF"
-            android:orientation="vertical"
-            android:padding="14dp"
             android:layout_marginBottom="14dp"
-            android:elevation="2dp">
+            android:background="#FFFFFF"
+            android:elevation="2dp"
+            android:orientation="vertical"
+            android:padding="14dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginBottom="10dp">
+                android:layout_marginBottom="10dp"
+                android:orientation="horizontal">
 
                 <TextView
                     android:layout_width="0dp"
@@ -66,6 +104,7 @@
                     android:id="@+id/tvSelectedMode"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:maxLines="1"
                     android:text="Mode: Office"
                     android:textColor="#1565C0"
                     android:textSize="13sp"
@@ -81,34 +120,35 @@
                     android:id="@+id/btnModeOffice"
                     android:layout_width="0dp"
                     android:layout_height="44dp"
+                    android:layout_marginEnd="6dp"
                     android:layout_weight="1"
+                    android:backgroundTint="#1565C0"
                     android:text="Office"
                     android:textAllCaps="false"
-                    android:backgroundTint="#1565C0"
-                    android:textColor="#FFFFFF"
-                    android:layout_marginEnd="6dp" />
+                    android:textColor="#FFFFFF" />
 
                 <Button
                     android:id="@+id/btnModeFamily"
                     android:layout_width="0dp"
                     android:layout_height="44dp"
+                    android:layout_marginStart="6dp"
                     android:layout_weight="1"
-                    android:text="Family"
-                    android:textAllCaps="false"
                     android:backgroundTint="#757575"
-                    android:textColor="#FFFFFF"
-                    android:layout_marginStart="6dp" />
+                    android:text="Home"
+                    android:textAllCaps="false"
+                    android:textColor="#FFFFFF" />
             </LinearLayout>
         </LinearLayout>
 
+        <!-- ID & Token Card -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="#FFFFFF"
-            android:orientation="vertical"
-            android:padding="14dp"
             android:layout_marginBottom="14dp"
-            android:elevation="2dp">
+            android:background="#FFFFFF"
+            android:elevation="2dp"
+            android:orientation="vertical"
+            android:padding="14dp">
 
             <TextView
                 android:layout_width="wrap_content"
@@ -122,12 +162,16 @@
                 android:id="@+id/etDeviceId"
                 android:layout_width="match_parent"
                 android:layout_height="46dp"
+                android:layout_marginTop="6dp"
+                android:layout_marginBottom="12dp"
+                android:background="#F9FAFB"
                 android:hint="Enter Device ID"
                 android:inputType="text"
+                android:maxLines="1"
                 android:paddingHorizontal="10dp"
-                android:background="#F9FAFB"
-                android:layout_marginTop="6dp"
-                android:layout_marginBottom="12dp" />
+                android:textColor="#212121"
+                android:textColorHint="#78909C"
+                android:textSize="14sp" />
 
             <TextView
                 android:layout_width="wrap_content"
@@ -140,20 +184,22 @@
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
                 android:layout_marginTop="6dp"
-                android:layout_marginBottom="12dp">
+                android:layout_marginBottom="12dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
 
                 <TextView
                     android:id="@+id/tvReceivedToken"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="Waiting for token..."
-                    android:textColor="#455A64"
                     android:background="#ECEFF1"
+                    android:ellipsize="middle"
+                    android:maxLines="1"
                     android:padding="10dp"
+                    android:text="Waiting for token..."
+                    android:textColor="#37474F"
                     android:textSize="13sp" />
 
                 <Button
@@ -161,103 +207,113 @@
                     android:layout_width="wrap_content"
                     android:layout_height="40dp"
                     android:layout_marginStart="8dp"
+                    android:backgroundTint="#37474F"
                     android:text="Paste"
                     android:textAllCaps="false"
-                    android:backgroundTint="#37474F"
                     android:textColor="#FFFFFF" />
             </LinearLayout>
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical">
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
 
                 <EditText
                     android:id="@+id/etToken"
                     android:layout_width="0dp"
                     android:layout_height="46dp"
                     android:layout_weight="1"
+                    android:background="#F9FAFB"
                     android:hint="Enter Token"
                     android:inputType="text"
+                    android:maxLines="1"
                     android:paddingHorizontal="10dp"
-                    android:background="#F9FAFB" />
+                    android:textColor="#212121"
+                    android:textColorHint="#78909C"
+                    android:textSize="14sp" />
 
                 <Button
                     android:id="@+id/btnVerifyToken"
                     android:layout_width="wrap_content"
                     android:layout_height="44dp"
                     android:layout_marginStart="8dp"
+                    android:backgroundTint="#00897B"
                     android:text="Activate"
                     android:textAllCaps="false"
-                    android:backgroundTint="#00897B"
                     android:textColor="#FFFFFF" />
             </LinearLayout>
 
             <TextView
                 android:id="@+id/tvTokenLogInfo"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:maxLines="2"
                 android:text="Token Audit: Pending Activation"
-                android:textColor="#607D8B"
-                android:textSize="12sp"
-                android:layout_marginTop="8dp" />
+                android:textColor="#546E7A"
+                android:textSize="12sp" />
         </LinearLayout>
 
+        <!-- Telemetry Info Card -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="#FFFFFF"
-            android:orientation="vertical"
-            android:padding="14dp"
             android:layout_marginBottom="14dp"
-            android:elevation="2dp">
+            android:background="#FFFFFF"
+            android:elevation="2dp"
+            android:orientation="vertical"
+            android:padding="14dp">
 
             <TextView
                 android:id="@+id/tvLastSync"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:maxLines="1"
                 android:text="Last Sync: --:--:--"
                 android:textColor="#37474F"
                 android:textSize="13sp" />
 
             <TextView
                 android:id="@+id/tvBatteryInfo"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:maxLines="1"
                 android:text="Battery: --% | Stay Log: Ready"
                 android:textColor="#37474F"
-                android:textSize="13sp"
-                android:layout_marginTop="4dp" />
+                android:textSize="13sp" />
 
             <TextView
                 android:id="@+id/tvStayAndDirection"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:maxLines="2"
                 android:text="Direction / Route: Idle | Dwell Time: 0m"
                 android:textColor="#37474F"
-                android:textSize="13sp"
-                android:layout_marginTop="4dp" />
+                android:textSize="13sp" />
         </LinearLayout>
 
+        <!-- Action Buttons -->
         <Button
             android:id="@+id/btnStartTracking"
             android:layout_width="match_parent"
             android:layout_height="52dp"
-            android:text="START TRACKING"
-            android:textStyle="bold"
+            android:layout_marginBottom="10dp"
             android:backgroundTint="#2E7D32"
+            android:text="START TRACKING"
             android:textColor="#FFFFFF"
-            android:layout_marginBottom="10dp" />
+            android:textStyle="bold" />
 
         <Button
             android:id="@+id/btnStopTracking"
             android:layout_width="match_parent"
             android:layout_height="52dp"
-            android:text="STOP TRACKING"
-            android:textStyle="bold"
             android:backgroundTint="#C62828"
-            android:textColor="#FFFFFF" />
+            android:text="STOP TRACKING"
+            android:textColor="#FFFFFF"
+            android:textStyle="bold" />
 
     </LinearLayout>
 </ScrollView>
