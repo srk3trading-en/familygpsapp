@@ -49,7 +49,7 @@
                     android:textSize="13sp" />
             </LinearLayout>
 
-            <!-- Radar Pulse Ring + Arrow Icon Container -->
+            <!-- Radar Pulse Ring + Arrow Icon Container (Temporarily Detached from Custom Drawables) -->
             <FrameLayout
                 android:layout_width="64dp"
                 android:layout_height="64dp"
@@ -62,7 +62,7 @@
                     android:layout_height="56dp"
                     android:layout_gravity="center"
                     android:alpha="0.0"
-                    android:background="@drawable/bg_radar_ring"
+                    android:background="@android:color/transparent"
                     android:visibility="invisible" />
 
                 <ImageView
@@ -71,7 +71,7 @@
                     android:layout_height="36dp"
                     android:layout_gravity="center"
                     android:contentDescription="Signal Status Icon"
-                    android:src="@drawable/ic_signal_arrow" />
+                    android:src="@android:drawable/ic_menu_compass" />
             </FrameLayout>
         </LinearLayout>
 
