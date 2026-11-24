@@ -1,6 +1,5 @@
 package com.sajidalam.familygps
 
-import android.Manifest
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
@@ -27,7 +26,6 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.ActivityCompat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -79,9 +77,9 @@ class MainActivity : AppCompatActivity() {
         tvGpsStatus = findViewById(R.id.tvGpsStatus)
         tvStatusDetail = findViewById(R.id.tvStatusDetail)
 
-        // Optional views in XML (safe if added in activity_main.xml)
         ivArrowIcon = findViewById(resources.getIdentifier("ivArrowIcon", "id", packageName))
         ivRadarSignal = findViewById(resources.getIdentifier("ivRadarSignal", "id", packageName))
+        ivRadarSignal?.visibility = View.INVISIBLE
 
         val btnModeOffice = findViewById<Button?>(R.id.btnModeOffice)
         val btnModeFamily = findViewById<Button?>(R.id.btnModeFamily)
@@ -96,33 +94,16 @@ class MainActivity : AppCompatActivity() {
         val btnPasteToken = findViewById<Button>(R.id.btnPasteToken)
         val etToken = findViewById<EditText>(R.id.etToken)
         val btnVerifyToken = findViewById<Button>(R.id.btnVerifyToken)
-        val tvTokenLogInfo = findViewById<TextView>(R.id.tvTokenLogInfo)
-        this.tvTokenLogInfo = tvTokenLogInfo
+        val tokenLogView = findViewById<TextView>(R.id.tvTokenLogInfo)
+        this.tvTokenLogInfo = tokenLogView
 
         val tvLastSync = findViewById<TextView>(R.id.tvLastSync)
         val tvBatteryInfo = findViewById<TextView>(R.id.tvBatteryInfo)
-        val tvStayAndDirection = findViewById<TextView>(R.id.tvStayAndDirection)
-        this.tvStayAndDirection = tvStayAndDirection
+        val stayView = findViewById<TextView>(R.id.tvStayAndDirection)
+        this.tvStayAndDirection = stayView
 
         val btnStartTracking = findViewById<Button>(R.id.btnStartTracking)
         val btnStopTracking = findViewById<Button>(R.id.btnStopTracking)
-
-        // 3D camera distance for arrow icon
-        val density = resources.displayMetrics.density
-        ivArrowIcon?.cameraDistance = 8000f * density
-
-        ActivityCompat.requestPermissions(
-            this,
-            arrayOf(
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION,
-                Manifest.permission.POST_NOTIFICATIONS
-            ),
-            100
-        )
-
-        isInternetAvailable = checkCurrentInternet()
-        registerNetworkMonitor()
 
         tvReceivedToken.text = "Enter ID first to generate token"
         refreshModeButtonsState(btnModeOffice, btnModeFamily)
@@ -153,7 +134,7 @@ class MainActivity : AppCompatActivity() {
             detailText = "$systemName ($selectedMode) | Please enter the ID",
             systemName = systemName
         )
-        updateBatteryAndInfo(tvBatteryInfo, tvStayAndDirection)
+        updateBatteryAndInfo(tvBatteryInfo, stayView)
 
         tvReceivedToken.setOnClickListener {
             val rawId = etDeviceId.text.toString().trim()
@@ -161,12 +142,12 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
             if (isSessionActive || isTokenActivated) {
-                tvTokenLogInfo.text = "Token Audit: Disconnect $activeSessionMode session first"
+                tokenLogView.text = "Token Audit: Disconnect $activeSessionMode session first"
                 return@setOnClickListener
             }
             generatedToken = generateLocalToken(rawId, selectedMode)
             tvReceivedToken.text = generatedToken
-            tvTokenLogInfo.text = "Token Audit: New $selectedMode token ready"
+            tokenLogView.text = "Token Audit: New $selectedMode token ready"
         }
 
         btnPasteToken.setOnClickListener {
@@ -175,7 +156,7 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
             if (isSessionActive || isTokenActivated) {
-                tvTokenLogInfo.text = "Token Audit: Session active. Disconnect first to reset"
+                tokenLogView.text = "Token Audit: Session active. Disconnect first to reset"
                 return@setOnClickListener
             }
 
@@ -186,18 +167,18 @@ class MainActivity : AppCompatActivity() {
             if (!usedTokens.contains(generatedToken)) {
                 tvReceivedToken.text = generatedToken
                 etToken.setText(generatedToken)
-                tvTokenLogInfo.text = "Token Audit: $selectedMode token pasted"
+                tokenLogView.text = "Token Audit: $selectedMode token pasted"
             } else {
                 val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 val clipText = clipboard.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString()?.trim()
                 if (!clipText.isNullOrEmpty() && !usedTokens.contains(clipText)) {
                     etToken.setText(clipText)
-                    tvTokenLogInfo.text = "Token Audit: Clipboard token pasted"
+                    tokenLogView.text = "Token Audit: Clipboard token pasted"
                 } else {
                     generatedToken = generateLocalToken(rawId, selectedMode)
                     tvReceivedToken.text = generatedToken
                     etToken.setText(generatedToken)
-                    tvTokenLogInfo.text = "Token Audit: Fresh single-use $selectedMode token pasted"
+                    tokenLogView.text = "Token Audit: Fresh single-use $selectedMode token pasted"
                 }
             }
         }
@@ -220,7 +201,7 @@ class MainActivity : AppCompatActivity() {
             val tokenValue = etToken.text.toString().trim()
             if (tokenValue.isEmpty()) {
                 etToken.error = "Enter or paste token"
-                tvTokenLogInfo.text = "Token Audit: Please enter or paste a token"
+                tokenLogView.text = "Token Audit: Please enter or paste a token"
                 return@setOnClickListener
             }
             etToken.error = null
@@ -229,7 +210,7 @@ class MainActivity : AppCompatActivity() {
                 etToken.text.clear()
                 generatedToken = generateLocalToken(rawId, selectedMode)
                 tvReceivedToken.text = generatedToken
-                tvTokenLogInfo.text = "Token Audit: Already used. New token generated"
+                tokenLogView.text = "Token Audit: Already used. New token generated"
                 return@setOnClickListener
             }
 
@@ -244,7 +225,7 @@ class MainActivity : AppCompatActivity() {
             val currentTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
             val label = resolveDisplayLabel(rawId, selectedMode)
             tvStatusDetail?.text = "$label | Token Verified"
-            tvTokenLogInfo.text = "Token Audit: Verified at $currentTime ($selectedMode)"
+            tokenLogView.text = "Token Audit: Verified at $currentTime ($selectedMode)"
             tvLastSync.text = "Last Sync: $currentTime"
         }
 
@@ -254,14 +235,13 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
 
-            // Enforce strict mode lock when a session is already active
             if (isSessionActive && activeSessionMode != null && activeSessionMode != selectedMode) {
                 Toast.makeText(
                     this,
                     "$activeSessionMode is active and locked. Disconnect first to use $selectedMode.",
                     Toast.LENGTH_SHORT
                 ).show()
-                tvTokenLogInfo.text = "Mode Lock: Disconnect $activeSessionMode before switching to $selectedMode"
+                tokenLogView.text = "Mode Lock: Disconnect $activeSessionMode before switching to $selectedMode"
                 return@setOnClickListener
             }
 
@@ -275,34 +255,34 @@ class MainActivity : AppCompatActivity() {
                 generatedToken = ""
                 etToken.text.clear()
                 tvReceivedToken.text = "$systemName ($selectedMode) Active Session Locked"
-                tvTokenLogInfo.text = "Token Audit: Auto-activated at $currentTime ($selectedMode)"
+                tokenLogView.text = "Token Audit: Auto-activated at $currentTime ($selectedMode)"
             }
 
-            // Lock session to current mode & ID
             isSessionActive = true
             activeSessionMode = selectedMode
             activeSessionId = rawId
             etDeviceId.isEnabled = false
             refreshModeButtonsState(btnModeOffice, btnModeFamily)
 
-            // Enter connecting state first -> icon spins in 3D
             isConnectingState = true
             statusBanner?.setBackgroundColor(Color.parseColor("#EF6C00"))
-            tvGpsStatus?.text = "⏳ GPS: CONNECTING ($selectedMode)..."
+            tvGpsStatus?.text = "GPS: CONNECTING ($selectedMode)..."
             tvStatusDetail?.text = "${resolveDisplayLabel(rawId, selectedMode)} | Connecting..."
-            applyVisualState()
 
-            val serviceIntent = Intent(this, LocationService::class.java).apply {
-                putExtra("DEVICE_ID", rawId)
-                putExtra("SYSTEM_NAME", systemName)
-                putExtra("TRACKING_MODE", selectedMode)
-                putExtra("TOKEN", activeToken)
-            }
+            try {
+                val serviceIntent = Intent(this, LocationService::class.java).apply {
+                    putExtra("DEVICE_ID", rawId)
+                    putExtra("SYSTEM_NAME", systemName)
+                    putExtra("TRACKING_MODE", selectedMode)
+                    putExtra("TOKEN", activeToken)
+                }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(serviceIntent)
-            } else {
-                startService(serviceIntent)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(serviceIntent)
+                } else {
+                    startService(serviceIntent)
+                }
+            } catch (_: Exception) {
             }
 
             uiHandler.removeCallbacksAndMessages(null)
@@ -311,16 +291,20 @@ class MainActivity : AppCompatActivity() {
                 isConnectingState = false
                 val syncTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
                 tvLastSync.text = "Last Sync: $syncTime"
-                updateBatteryAndInfo(tvBatteryInfo, tvStayAndDirection)
-                applyVisualState()
+                updateBatteryAndInfo(tvBatteryInfo, stayView)
+                statusBanner?.setBackgroundColor(Color.parseColor("#2E7D32"))
+                tvGpsStatus?.text = "GPS: CONNECTED & TRACKING ($selectedMode)"
+                tvStatusDetail?.text = "${resolveDisplayLabel(rawId, selectedMode)} | Live Signal Active"
             }, 1200)
         }
 
         btnStopTracking.setOnClickListener {
             uiHandler.removeCallbacksAndMessages(null)
-            stopService(Intent(this, LocationService::class.java))
+            try {
+                stopService(Intent(this, LocationService::class.java))
+            } catch (_: Exception) {
+            }
 
-            // Fully clear active session & mode lock
             isSessionActive = false
             activeSessionMode = null
             activeSessionId = null
@@ -373,7 +357,6 @@ class MainActivity : AppCompatActivity() {
 
         if (selectedMode != targetMode) {
             selectedMode = targetMode
-            // Clear stale token/ID leakage when switching modes before connecting
             activeToken = null
             isTokenActivated = false
             etToken.text.clear()
@@ -401,50 +384,6 @@ class MainActivity : AppCompatActivity() {
             "Mode: $selectedMode"
         }
         tvSelectedMode?.text = modeLabel
-    }
-
-    private fun applyVisualState() {
-        val currentMode = activeSessionMode ?: selectedMode
-        val currentId = activeSessionId ?: ""
-        val label = if (currentId.isNotBlank()) resolveDisplayLabel(currentId, currentMode) else currentMode
-
-        if (!isSessionActive) {
-            stopSpin3D()
-            stopRadarPulse()
-            moveIconToBottom()
-            ivRadarSignal?.visibility = View.INVISIBLE
-            return
-        }
-
-        // Session is active: check connecting & internet state
-        if (isConnectingState || !isInternetAvailable) {
-            // Bring icon down from header and spin in 3D; stop radar signal
-            moveIconToBottom()
-            startSpin3D()
-            stopRadarPulse()
-            ivRadarSignal?.visibility = View.INVISIBLE
-
-            statusBanner?.setBackgroundColor(Color.parseColor("#EF6C00"))
-            if (!isInternetAvailable) {
-                tvGpsStatus?.text = "📡 NO INTERNET: RECONNECTING ($currentMode)"
-                tvStatusDetail?.text = "$label | Waiting for internet signal..."
-                tvStayAndDirection?.text = "Direction / Route: Waiting for Network ($currentMode)"
-            } else {
-                tvGpsStatus?.text = "⏳ GPS: CONNECTING ($currentMode)..."
-                tvStatusDetail?.text = "$label | Establishing connection..."
-            }
-        } else {
-            // Connected & internet available: stop 3D spin, move icon up to header, start radar signal
-            stopSpin3D()
-            moveIconToHeader()
-            ivRadarSignal?.visibility = View.VISIBLE
-            startRadarPulse()
-
-            statusBanner?.setBackgroundColor(Color.parseColor("#2E7D32"))
-            tvGpsStatus?.text = "🛰️ GPS: CONNECTED & TRACKING ($currentMode)"
-            tvStatusDetail?.text = "$label | Live Signal Active"
-            tvStayAndDirection?.text = "Direction / Route: Monitoring ($currentMode) | Dwell Time: 0m"
-        }
     }
 
     private fun startSpin3D() {
@@ -533,47 +472,48 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun checkCurrentInternet(): Boolean {
-        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val activeNetwork = cm.activeNetwork ?: return false
-        val caps = cm.getNetworkCapabilities(activeNetwork) ?: return false
-        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        return try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val activeNetwork = cm.activeNetwork ?: return false
+            val caps = cm.getNetworkCapabilities(activeNetwork) ?: return false
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun registerNetworkMonitor() {
-        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        connectivityManager = cm
-
-        val callback = object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) {
-                runOnUiThread {
-                    isInternetAvailable = checkCurrentInternet()
-                    applyVisualState()
-                }
-            }
-
-            override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
-                runOnUiThread {
-                    val hasNet = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-                        networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-                    isInternetAvailable = hasNet
-                    applyVisualState()
-                }
-            }
-
-            override fun onLost(network: Network) {
-                runOnUiThread {
-                    isInternetAvailable = checkCurrentInternet()
-                    applyVisualState()
-                }
-            }
-        }
-
-        networkCallback = callback
-        val request = NetworkRequest.Builder()
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            .build()
         try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            connectivityManager = cm
+
+            val callback = object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    runOnUiThread {
+                        isInternetAvailable = checkCurrentInternet()
+                    }
+                }
+
+                override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+                    runOnUiThread {
+                        val hasNet = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                            networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                        isInternetAvailable = hasNet
+                    }
+                }
+
+                override fun onLost(network: Network) {
+                    runOnUiThread {
+                        isInternetAvailable = checkCurrentInternet()
+                    }
+                }
+            }
+
+            networkCallback = callback
+            val request = NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .build()
             cm.registerNetworkCallback(request, callback)
         } catch (_: Exception) {
         }
@@ -630,7 +570,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setDisconnectedState(detailText: String, systemName: String) {
         statusBanner?.setBackgroundColor(Color.parseColor("#D32F2F"))
-        tvGpsStatus?.text = "🚫📡 GPS: DISCONNECTED"
+        tvGpsStatus?.text = "GPS: DISCONNECTED"
         tvStatusDetail?.text = detailText
         refreshModeButtonsState(
             findViewById(R.id.btnModeOffice),
@@ -638,7 +578,6 @@ class MainActivity : AppCompatActivity() {
         )
         tvTokenLogInfo?.text = "Token Audit: Ready for fresh $systemName ($selectedMode) token"
         tvStayAndDirection?.text = "Direction / Route: Stopped | Dwell Time: 0m"
-        applyVisualState()
     }
 
     private fun updateBatteryAndInfo(tvBattery: TextView, tvStay: TextView) {
