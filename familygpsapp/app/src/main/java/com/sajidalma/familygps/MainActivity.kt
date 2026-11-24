@@ -9,6 +9,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -30,6 +33,8 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import org.json.JSONArray
+import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -40,6 +45,8 @@ class MainActivity : AppCompatActivity() {
     companion object {
         const val MODE_OFFICE = "Office"
         const val MODE_HOME = "Home"
+        private const val PREFS_NAME = "srk_gps_offline_prefs"
+        private const val KEY_OFFLINE_QUEUE = "offline_queue_json"
     }
 
     private var selectedMode: String = MODE_OFFICE
@@ -54,10 +61,15 @@ class MainActivity : AppCompatActivity() {
 
     private var isInternetAvailable: Boolean = false
     private var isConnectingState: Boolean = false
-    private var offlineQueuedCount: Int = 0
 
     private var connectivityManager: ConnectivityManager? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
+
+    private var locationManager: LocationManager? = null
+    private var locationListener: LocationListener? = null
+    private var lastKnownLocation: Location? = null
+    private var sessionStartMillis: Long = 0L
+    private var stationarySinceMillis: Long = 0L
 
     private var spin3DAnimator: ObjectAnimator? = null
     private var radarPulseAnimator: AnimatorSet? = null
@@ -70,8 +82,9 @@ class MainActivity : AppCompatActivity() {
     private var tvStatusDetail: TextView? = null
     private var tvSelectedMode: TextView? = null
     private var tvTokenLogInfo: TextView? = null
-    private var tvStayAndDirection: TextView? = null
+    private var tvLastSync: TextView? = null
     private var tvBatteryInfo: TextView? = null
+    private var tvStayAndDirection: TextView? = null
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -82,6 +95,17 @@ class MainActivity : AppCompatActivity() {
             tvTokenLogInfo?.text = "Permission Note: Location permission needed for GPS tracking"
         } else {
             tvTokenLogInfo?.text = "Permission Ready: Location access granted"
+            if (isSessionActive) {
+                startGpsUpdates()
+            }
+        }
+    }
+
+    private val syncTicker = object : Runnable {
+        override fun run() {
+            if (!isSessionActive) return
+            captureAndProcessTelemetry()
+            uiHandler.postDelayed(this, 5000L)
         }
     }
 
@@ -118,7 +142,8 @@ class MainActivity : AppCompatActivity() {
         val tokenLogView = findViewById<TextView>(R.id.tvTokenLogInfo)
         this.tvTokenLogInfo = tokenLogView
 
-        val tvLastSync = findViewById<TextView>(R.id.tvLastSync)
+        val lastSyncView = findViewById<TextView>(R.id.tvLastSync)
+        this.tvLastSync = lastSyncView
         val batteryView = findViewById<TextView>(R.id.tvBatteryInfo)
         this.tvBatteryInfo = batteryView
         val stayView = findViewById<TextView>(R.id.tvStayAndDirection)
@@ -253,7 +278,7 @@ class MainActivity : AppCompatActivity() {
             val label = resolveDisplayLabel(rawId, selectedMode)
             tvStatusDetail?.text = "$label | Token Verified"
             tokenLogView.text = "Token Audit: Verified at $currentTime ($selectedMode)"
-            tvLastSync.text = "Last Sync: $currentTime"
+            lastSyncView.text = "Last Sync: $currentTime"
         }
 
         btnStartTracking.setOnClickListener {
@@ -288,8 +313,12 @@ class MainActivity : AppCompatActivity() {
             isSessionActive = true
             activeSessionMode = selectedMode
             activeSessionId = rawId
+            sessionStartMillis = System.currentTimeMillis()
+            stationarySinceMillis = sessionStartMillis
             etDeviceId.isEnabled = false
             refreshModeButtonsState(btnModeOffice, btnModeFamily)
+
+            startGpsUpdates()
 
             isConnectingState = true
             statusBanner?.setBackgroundColor(Color.parseColor("#EF6C00"))
@@ -313,19 +342,18 @@ class MainActivity : AppCompatActivity() {
             } catch (_: Exception) {
             }
 
-            uiHandler.removeCallbacksAndMessages(null)
+            uiHandler.removeCallbacks(syncTicker)
             uiHandler.postDelayed({
                 if (!isSessionActive) return@postDelayed
                 isConnectingState = false
-                val syncTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-                tvLastSync.text = "Last Sync: $syncTime"
-                updateBatteryAndInfo(batteryView, stayView)
-                applyVisualState()
+                captureAndProcessTelemetry()
+                uiHandler.postDelayed(syncTicker, 5000L)
             }, 1200)
         }
 
         btnStopTracking.setOnClickListener {
-            uiHandler.removeCallbacksAndMessages(null)
+            uiHandler.removeCallbacks(syncTicker)
+            stopGpsUpdates()
             try {
                 stopService(Intent(this, LocationService::class.java))
             } catch (_: Exception) {
@@ -360,6 +388,187 @@ class MainActivity : AppCompatActivity() {
                 detailText = detailText,
                 systemName = systemName
             )
+        }
+    }
+
+    private fun startGpsUpdates() {
+        val hasFine = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val hasCoarse = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (!hasFine && !hasCoarse) return
+
+        try {
+            val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            locationManager = lm
+
+            val listener = object : LocationListener {
+                override fun onLocationChanged(location: Location) {
+                    val prev = lastKnownLocation
+                    if (prev != null && prev.distanceTo(location) > 15f) {
+                        stationarySinceMillis = System.currentTimeMillis()
+                    }
+                    lastKnownLocation = location
+                    if (isSessionActive && !isConnectingState) {
+                        updateTelemetryText()
+                    }
+                }
+
+                @Deprecated("Deprecated in Android")
+                override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {
+                }
+
+                override fun onProviderEnabled(provider: String) {
+                }
+
+                override fun onProviderDisabled(provider: String) {
+                }
+            }
+            locationListener = listener
+
+            if (hasFine && lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 4000L, 5f, listener)
+                lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)?.let { lastKnownLocation = it }
+            }
+            if (hasCoarse && lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 4000L, 10f, listener)
+                if (lastKnownLocation == null) {
+                    lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)?.let { lastKnownLocation = it }
+                }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun stopGpsUpdates() {
+        try {
+            locationListener?.let { listener ->
+                locationManager?.removeUpdates(listener)
+            }
+        } catch (_: Exception) {
+        }
+        locationListener = null
+    }
+
+    private fun captureAndProcessTelemetry() {
+        val currentMode = activeSessionMode ?: selectedMode
+        val currentId = activeSessionId ?: ""
+        val nowTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+        val batteryPct = getBatteryPercentage()
+
+        isInternetAvailable = checkCurrentInternet()
+
+        val record = JSONObject().apply {
+            put("mode", currentMode)
+            put("deviceId", currentId)
+            put("token", activeToken ?: "")
+            put("lat", lastKnownLocation?.latitude ?: 0.0)
+            put("lng", lastKnownLocation?.longitude ?: 0.0)
+            put("bearing", lastKnownLocation?.bearing ?: 0f)
+            put("battery", batteryPct)
+            put("timestamp", nowTime)
+        }
+
+        if (isInternetAvailable) {
+            flushOfflineQueue()
+            tvLastSync?.text = "Last Sync: $nowTime"
+        } else {
+            enqueueOfflineRecord(record)
+        }
+
+        updateTelemetryText()
+        applyVisualState()
+    }
+
+    private fun getOfflineQueueArray(): JSONArray {
+        return try {
+            val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val raw = prefs.getString(KEY_OFFLINE_QUEUE, "[]") ?: "[]"
+            JSONArray(raw)
+        } catch (_: Exception) {
+            JSONArray()
+        }
+    }
+
+    private fun saveOfflineQueueArray(arr: JSONArray) {
+        try {
+            val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.edit().putString(KEY_OFFLINE_QUEUE, arr.toString()).apply()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun enqueueOfflineRecord(record: JSONObject) {
+        val arr = getOfflineQueueArray()
+        arr.put(record)
+        saveOfflineQueueArray(arr)
+    }
+
+    private fun flushOfflineQueue(): Int {
+        val arr = getOfflineQueueArray()
+        val count = arr.length()
+        if (count > 0) {
+            saveOfflineQueueArray(JSONArray())
+        }
+        return count
+    }
+
+    private fun getQueuedCount(): Int = getOfflineQueueArray().length()
+
+    private fun getBatteryPercentage(): Int {
+        return try {
+            val bm = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+            val level = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            if (level in 0..100) level else -1
+        } catch (_: Exception) {
+            -1
+        }
+    }
+
+    private fun formatBearing(bearing: Float): String {
+        val normalized = ((bearing % 360f) + 360f) % 360f
+        return when {
+            normalized >= 337.5f || normalized < 22.5f -> "North"
+            normalized < 67.5f -> "North-East"
+            normalized < 112.5f -> "East"
+            normalized < 157.5f -> "South-East"
+            normalized < 202.5f -> "South"
+            normalized < 247.5f -> "South-West"
+            normalized < 292.5f -> "West"
+            else -> "North-West"
+        }
+    }
+
+    private fun updateTelemetryText() {
+        val modeName = activeSessionMode ?: selectedMode
+        val level = getBatteryPercentage()
+        val batteryText = if (level in 0..100) "$level%" else "--%"
+        val queued = getQueuedCount()
+
+        val dwellMins = if (stationarySinceMillis > 0L) {
+            ((System.currentTimeMillis() - stationarySinceMillis) / 60000L).coerceAtLeast(0L)
+        } else {
+            0L
+        }
+
+        val loc = lastKnownLocation
+        val gpsSummary = if (loc != null) {
+            val dir = formatBearing(loc.bearing)
+            "${String.format(Locale.US, "%.4f", loc.latitude)}, ${String.format(Locale.US, "%.4f", loc.longitude)} ($dir)"
+        } else {
+            "Waiting GPS ($modeName)"
+        }
+
+        tvBatteryInfo?.text = "Battery: $batteryText | Stay Log: Active"
+        tvStayAndDirection?.text = if (!isInternetAvailable && queued > 0) {
+            "Direction / Route: $gpsSummary | Queued: $queued | Dwell: ${dwellMins}m"
+        } else {
+            "Direction / Route: $gpsSummary | Dwell: ${dwellMins}m"
         }
     }
 
@@ -463,8 +672,8 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        val queued = getQueuedCount()
         if (!isInternetAvailable) {
-            offlineQueuedCount += 1
             stopSpin3D()
             moveIconToHeader()
             ivRadarSignal?.visibility = View.INVISIBLE
@@ -472,8 +681,7 @@ class MainActivity : AppCompatActivity() {
 
             statusBanner?.setBackgroundColor(Color.parseColor("#37474F"))
             tvGpsStatus?.text = "GPS: OFFLINE BUFFER ($currentMode)"
-            tvStatusDetail?.text = "$label | Saving locally ($offlineQueuedCount queued)"
-            tvStayAndDirection?.text = "Direction / Route: Offline Log ($currentMode) | Queued: $offlineQueuedCount"
+            tvStatusDetail?.text = "$label | Saving locally ($queued queued)"
         } else {
             stopSpin3D()
             moveIconToHeader()
@@ -483,7 +691,6 @@ class MainActivity : AppCompatActivity() {
             statusBanner?.setBackgroundColor(Color.parseColor("#2E7D32"))
             tvGpsStatus?.text = "GPS: CONNECTED & TRACKING ($currentMode)"
             tvStatusDetail?.text = "$label | Live Signal Active"
-            tvStayAndDirection?.text = "Direction / Route: Monitoring ($currentMode) | Dwell Time: 0m"
         }
     }
 
@@ -592,7 +799,15 @@ class MainActivity : AppCompatActivity() {
                 override fun onAvailable(network: Network) {
                     runOnUiThread {
                         isInternetAvailable = checkCurrentInternet()
-                        if (isSessionActive) applyVisualState()
+                        if (isSessionActive) {
+                            val flushed = flushOfflineQueue()
+                            if (flushed > 0) {
+                                val syncTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+                                tvLastSync?.text = "Last Sync: $syncTime ($flushed synced)"
+                            }
+                            updateTelemetryText()
+                            applyVisualState()
+                        }
                     }
                 }
 
@@ -601,14 +816,27 @@ class MainActivity : AppCompatActivity() {
                         isInternetAvailable = networkCapabilities.hasCapability(
                             NetworkCapabilities.NET_CAPABILITY_INTERNET
                         )
-                        if (isSessionActive) applyVisualState()
+                        if (isSessionActive) {
+                            if (isInternetAvailable) {
+                                val flushed = flushOfflineQueue()
+                                if (flushed > 0) {
+                                    val syncTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+                                    tvLastSync?.text = "Last Sync: $syncTime ($flushed synced)"
+                                }
+                            }
+                            updateTelemetryText()
+                            applyVisualState()
+                        }
                     }
                 }
 
                 override fun onLost(network: Network) {
                     runOnUiThread {
                         isInternetAvailable = checkCurrentInternet()
-                        if (isSessionActive) applyVisualState()
+                        if (isSessionActive) {
+                            updateTelemetryText()
+                            applyVisualState()
+                        }
                     }
                 }
             }
@@ -685,16 +913,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateBatteryAndInfo(tvBattery: TextView, tvStay: TextView) {
-        val bm = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
-        val level = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        val level = getBatteryPercentage()
         val batteryText = if (level in 0..100) "$level%" else "--%"
         val modeName = activeSessionMode ?: selectedMode
         tvBattery.text = "Battery: $batteryText | Stay Log: Active"
-        tvStay.text = "Direction / Route: Monitoring ($modeName) | Dwell Time: 0m"
+        tvStay.text = "Direction / Route: Monitoring ($modeName) | Dwell: 0m"
     }
 
     override fun onDestroy() {
+        uiHandler.removeCallbacks(syncTicker)
         uiHandler.removeCallbacksAndMessages(null)
+        stopGpsUpdates()
         stopSpin3D()
         stopRadarPulse()
         networkCallback?.let { cb ->
