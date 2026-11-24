@@ -1,11 +1,13 @@
 package com.sajidalam.familygps
 
+import android.Manifest
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.ConnectivityManager
 import android.net.Network
@@ -25,7 +27,9 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -50,6 +54,7 @@ class MainActivity : AppCompatActivity() {
 
     private var isInternetAvailable: Boolean = false
     private var isConnectingState: Boolean = false
+    private var offlineQueuedCount: Int = 0
 
     private var connectivityManager: ConnectivityManager? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
@@ -66,6 +71,19 @@ class MainActivity : AppCompatActivity() {
     private var tvSelectedMode: TextView? = null
     private var tvTokenLogInfo: TextView? = null
     private var tvStayAndDirection: TextView? = null
+    private var tvBatteryInfo: TextView? = null
+
+    private val permissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        val fineOk = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        val coarseOk = grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (!fineOk && !coarseOk) {
+            tvTokenLogInfo?.text = "Permission Note: Location permission needed for GPS tracking"
+        } else {
+            tvTokenLogInfo?.text = "Permission Ready: Location access granted"
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -101,12 +119,15 @@ class MainActivity : AppCompatActivity() {
         this.tvTokenLogInfo = tokenLogView
 
         val tvLastSync = findViewById<TextView>(R.id.tvLastSync)
-        val tvBatteryInfo = findViewById<TextView>(R.id.tvBatteryInfo)
+        val batteryView = findViewById<TextView>(R.id.tvBatteryInfo)
+        this.tvBatteryInfo = batteryView
         val stayView = findViewById<TextView>(R.id.tvStayAndDirection)
         this.tvStayAndDirection = stayView
 
         val btnStartTracking = findViewById<Button>(R.id.btnStartTracking)
         val btnStopTracking = findViewById<Button>(R.id.btnStopTracking)
+
+        requestRequiredPermissionsIfNeeded()
 
         isInternetAvailable = checkCurrentInternet()
         registerNetworkMonitor()
@@ -140,7 +161,7 @@ class MainActivity : AppCompatActivity() {
             detailText = "$systemName ($selectedMode) | Please enter the ID",
             systemName = systemName
         )
-        updateBatteryAndInfo(tvBatteryInfo, stayView)
+        updateBatteryAndInfo(batteryView, stayView)
 
         tvReceivedToken.setOnClickListener {
             val rawId = etDeviceId.text.toString().trim()
@@ -298,7 +319,7 @@ class MainActivity : AppCompatActivity() {
                 isConnectingState = false
                 val syncTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
                 tvLastSync.text = "Last Sync: $syncTime"
-                updateBatteryAndInfo(tvBatteryInfo, stayView)
+                updateBatteryAndInfo(batteryView, stayView)
                 applyVisualState()
             }, 1200)
         }
@@ -339,6 +360,32 @@ class MainActivity : AppCompatActivity() {
                 detailText = detailText,
                 systemName = systemName
             )
+        }
+    }
+
+    private fun requestRequiredPermissionsIfNeeded() {
+        val needed = mutableListOf<String>()
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            needed.add(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            needed.add(Manifest.permission.ACCESS_COARSE_LOCATION)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            needed.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (needed.isNotEmpty()) {
+            try {
+                permissionLauncher.launch(needed.toTypedArray())
+            } catch (_: Exception) {
+            }
         }
     }
 
@@ -404,21 +451,29 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        if (isConnectingState || !isInternetAvailable) {
+        if (isConnectingState) {
             moveIconToBottom()
             startSpin3D()
             stopRadarPulse()
             ivRadarSignal?.visibility = View.INVISIBLE
 
             statusBanner?.setBackgroundColor(Color.parseColor("#EF6C00"))
-            if (!isInternetAvailable) {
-                tvGpsStatus?.text = "NO INTERNET: RECONNECTING ($currentMode)"
-                tvStatusDetail?.text = "$label | Waiting for internet signal..."
-                tvStayAndDirection?.text = "Direction / Route: Waiting for Network ($currentMode)"
-            } else {
-                tvGpsStatus?.text = "GPS: CONNECTING ($currentMode)..."
-                tvStatusDetail?.text = "$label | Establishing connection..."
-            }
+            tvGpsStatus?.text = "GPS: CONNECTING ($currentMode)..."
+            tvStatusDetail?.text = "$label | Establishing signal..."
+            return
+        }
+
+        if (!isInternetAvailable) {
+            offlineQueuedCount += 1
+            stopSpin3D()
+            moveIconToHeader()
+            ivRadarSignal?.visibility = View.INVISIBLE
+            stopRadarPulse()
+
+            statusBanner?.setBackgroundColor(Color.parseColor("#37474F"))
+            tvGpsStatus?.text = "GPS: OFFLINE BUFFER ($currentMode)"
+            tvStatusDetail?.text = "$label | Saving locally ($offlineQueuedCount queued)"
+            tvStayAndDirection?.text = "Direction / Route: Offline Log ($currentMode) | Queued: $offlineQueuedCount"
         } else {
             stopSpin3D()
             moveIconToHeader()
@@ -522,8 +577,7 @@ class MainActivity : AppCompatActivity() {
             val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
             val activeNetwork = cm.activeNetwork ?: return false
             val caps = cm.getNetworkCapabilities(activeNetwork) ?: return false
-            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
         } catch (_: Exception) {
             false
         }
@@ -544,9 +598,9 @@ class MainActivity : AppCompatActivity() {
 
                 override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
                     runOnUiThread {
-                        val hasNet = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-                            networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-                        isInternetAvailable = hasNet
+                        isInternetAvailable = networkCapabilities.hasCapability(
+                            NetworkCapabilities.NET_CAPABILITY_INTERNET
+                        )
                         if (isSessionActive) applyVisualState()
                     }
                 }
