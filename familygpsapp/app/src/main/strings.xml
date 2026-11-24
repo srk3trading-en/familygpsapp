@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SRK GPS Locator</string>
+    <string name="mode_locked_family">Family / System Mode (Locked)</string>
+    <string name="token_hint">Enter Activation Token</string>
+    <string name="btn_activate">Activate Device</string>
+    <string name="status_inactive">Status: Inactive</string>
+    <string name="status_active">Status: Active &amp; Running</string>
+    <string name="error_empty_token">Please enter a valid token.</string>
+</resources>
