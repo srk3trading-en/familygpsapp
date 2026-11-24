@@ -77,9 +77,12 @@ class MainActivity : AppCompatActivity() {
         tvGpsStatus = findViewById(R.id.tvGpsStatus)
         tvStatusDetail = findViewById(R.id.tvStatusDetail)
 
-        ivArrowIcon = findViewById(resources.getIdentifier("ivArrowIcon", "id", packageName))
-        ivRadarSignal = findViewById(resources.getIdentifier("ivRadarSignal", "id", packageName))
+        ivArrowIcon = findViewById(R.id.ivArrowIcon)
+        ivRadarSignal = findViewById(R.id.ivRadarSignal)
         ivRadarSignal?.visibility = View.INVISIBLE
+
+        val density = resources.displayMetrics.density
+        ivArrowIcon?.cameraDistance = 8000f * density
 
         val btnModeOffice = findViewById<Button?>(R.id.btnModeOffice)
         val btnModeFamily = findViewById<Button?>(R.id.btnModeFamily)
@@ -104,6 +107,9 @@ class MainActivity : AppCompatActivity() {
 
         val btnStartTracking = findViewById<Button>(R.id.btnStartTracking)
         val btnStopTracking = findViewById<Button>(R.id.btnStopTracking)
+
+        isInternetAvailable = checkCurrentInternet()
+        registerNetworkMonitor()
 
         tvReceivedToken.text = "Enter ID first to generate token"
         refreshModeButtonsState(btnModeOffice, btnModeFamily)
@@ -268,6 +274,7 @@ class MainActivity : AppCompatActivity() {
             statusBanner?.setBackgroundColor(Color.parseColor("#EF6C00"))
             tvGpsStatus?.text = "GPS: CONNECTING ($selectedMode)..."
             tvStatusDetail?.text = "${resolveDisplayLabel(rawId, selectedMode)} | Connecting..."
+            applyVisualState()
 
             try {
                 val serviceIntent = Intent(this, LocationService::class.java).apply {
@@ -292,9 +299,7 @@ class MainActivity : AppCompatActivity() {
                 val syncTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
                 tvLastSync.text = "Last Sync: $syncTime"
                 updateBatteryAndInfo(tvBatteryInfo, stayView)
-                statusBanner?.setBackgroundColor(Color.parseColor("#2E7D32"))
-                tvGpsStatus?.text = "GPS: CONNECTED & TRACKING ($selectedMode)"
-                tvStatusDetail?.text = "${resolveDisplayLabel(rawId, selectedMode)} | Live Signal Active"
+                applyVisualState()
             }, 1200)
         }
 
@@ -386,6 +391,47 @@ class MainActivity : AppCompatActivity() {
         tvSelectedMode?.text = modeLabel
     }
 
+    private fun applyVisualState() {
+        val currentMode = activeSessionMode ?: selectedMode
+        val currentId = activeSessionId ?: ""
+        val label = if (currentId.isNotBlank()) resolveDisplayLabel(currentId, currentMode) else currentMode
+
+        if (!isSessionActive) {
+            stopSpin3D()
+            stopRadarPulse()
+            moveIconToBottom()
+            ivRadarSignal?.visibility = View.INVISIBLE
+            return
+        }
+
+        if (isConnectingState || !isInternetAvailable) {
+            moveIconToBottom()
+            startSpin3D()
+            stopRadarPulse()
+            ivRadarSignal?.visibility = View.INVISIBLE
+
+            statusBanner?.setBackgroundColor(Color.parseColor("#EF6C00"))
+            if (!isInternetAvailable) {
+                tvGpsStatus?.text = "NO INTERNET: RECONNECTING ($currentMode)"
+                tvStatusDetail?.text = "$label | Waiting for internet signal..."
+                tvStayAndDirection?.text = "Direction / Route: Waiting for Network ($currentMode)"
+            } else {
+                tvGpsStatus?.text = "GPS: CONNECTING ($currentMode)..."
+                tvStatusDetail?.text = "$label | Establishing connection..."
+            }
+        } else {
+            stopSpin3D()
+            moveIconToHeader()
+            ivRadarSignal?.visibility = View.VISIBLE
+            startRadarPulse()
+
+            statusBanner?.setBackgroundColor(Color.parseColor("#2E7D32"))
+            tvGpsStatus?.text = "GPS: CONNECTED & TRACKING ($currentMode)"
+            tvStatusDetail?.text = "$label | Live Signal Active"
+            tvStayAndDirection?.text = "Direction / Route: Monitoring ($currentMode) | Dwell Time: 0m"
+        }
+    }
+
     private fun startSpin3D() {
         val target = ivArrowIcon ?: return
         if (spin3DAnimator?.isRunning == true) return
@@ -407,10 +453,10 @@ class MainActivity : AppCompatActivity() {
     private fun moveIconToHeader() {
         val target = ivArrowIcon ?: return
         val bannerHeight = statusBanner?.height ?: 0
-        val targetTranslationY = if (bannerHeight > 0) {
-            -(target.top - (bannerHeight / 2f) + (target.height / 2f)).coerceAtLeast(0f)
+        val targetTranslationY = if (bannerHeight > 0 && target.height > 0) {
+            -(target.top - (bannerHeight / 2f) + (target.height / 2f)).coerceIn(-250f, 250f)
         } else {
-            -180f
+            0f
         }
 
         target.animate()
@@ -492,6 +538,7 @@ class MainActivity : AppCompatActivity() {
                 override fun onAvailable(network: Network) {
                     runOnUiThread {
                         isInternetAvailable = checkCurrentInternet()
+                        if (isSessionActive) applyVisualState()
                     }
                 }
 
@@ -500,12 +547,14 @@ class MainActivity : AppCompatActivity() {
                         val hasNet = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
                             networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
                         isInternetAvailable = hasNet
+                        if (isSessionActive) applyVisualState()
                     }
                 }
 
                 override fun onLost(network: Network) {
                     runOnUiThread {
                         isInternetAvailable = checkCurrentInternet()
+                        if (isSessionActive) applyVisualState()
                     }
                 }
             }
@@ -578,6 +627,7 @@ class MainActivity : AppCompatActivity() {
         )
         tvTokenLogInfo?.text = "Token Audit: Ready for fresh $systemName ($selectedMode) token"
         tvStayAndDirection?.text = "Direction / Route: Stopped | Dwell Time: 0m"
+        applyVisualState()
     }
 
     private fun updateBatteryAndInfo(tvBattery: TextView, tvStay: TextView) {
