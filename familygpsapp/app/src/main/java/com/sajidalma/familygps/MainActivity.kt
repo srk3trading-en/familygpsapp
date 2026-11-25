@@ -50,8 +50,9 @@ class MainActivity : AppCompatActivity() {
         const val MODE_HOME = "Home"
         private const val PREFS_NAME = "srk_gps_offline_prefs"
         private const val KEY_OFFLINE_QUEUE = "offline_queue_json"
-        private const val DESKTOP_BASE_URL = "http://192.168.1.4:8085"
+        private const val DESKTOP_BASE_URL = "http://192.168.1.3:8085"
         private const val DESKTOP_SYNC_URL = "$DESKTOP_BASE_URL/api/sync"
+        private const val DESKTOP_BOOKER_RETURN_URL = "$DESKTOP_BASE_URL/api/booker-return"
         private const val DESKTOP_HEALTH_URL = "$DESKTOP_BASE_URL/health"
     }
 
@@ -68,7 +69,19 @@ class MainActivity : AppCompatActivity() {
                 val code = conn.responseCode
                 code in 200..299
             } catch (_: Exception) {
-                false
+                try {
+                    val baseUrl = URL(DESKTOP_BASE_URL)
+                    val baseConn = (baseUrl.openConnection() as HttpURLConnection).apply {
+                        requestMethod = "GET"
+                        connectTimeout = timeoutMs
+                        readTimeout = timeoutMs
+                    }
+                    val ok = baseConn.responseCode in 200..299
+                    baseConn.disconnect()
+                    ok
+                } catch (_: Exception) {
+                    false
+                }
             } finally {
                 conn?.disconnect()
             }
@@ -100,11 +113,42 @@ class MainActivity : AppCompatActivity() {
                 }.orEmpty()
 
                 if (code in 200..299) {
-                    val json = JSONObject(body)
-                    json.optString("status") == "synced"
+                    if (body.isBlank()) true
+                    else {
+                        val json = JSONObject(body)
+                        val st = json.optString("status")
+                        st == "synced" || st == "ok" || json.optBoolean("ok", true)
+                    }
                 } else {
                     false
                 }
+            } catch (_: Exception) {
+                false
+            } finally {
+                conn?.disconnect()
+            }
+        }
+
+        fun postBookerReturn(returnPayload: JSONObject, timeoutMs: Int = 6000): Boolean {
+            var conn: HttpURLConnection? = null
+            return try {
+                val url = URL(DESKTOP_BOOKER_RETURN_URL)
+                conn = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = timeoutMs
+                    readTimeout = timeoutMs
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                    setRequestProperty("Accept", "application/json")
+                }
+
+                OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { writer ->
+                    writer.write(returnPayload.toString())
+                    writer.flush()
+                }
+
+                val code = conn.responseCode
+                code in 200..299
             } catch (_: Exception) {
                 false
             } finally {
@@ -134,6 +178,7 @@ class MainActivity : AppCompatActivity() {
     private var lastKnownLocation: Location? = null
     private var sessionStartMillis: Long = 0L
     private var stationarySinceMillis: Long = 0L
+    private var stopsCount: Int = 0
 
     private var spin3DAnimator: ObjectAnimator? = null
     private var radarPulseAnimator: AnimatorSet? = null
@@ -378,6 +423,7 @@ class MainActivity : AppCompatActivity() {
             activeSessionId = rawId
             sessionStartMillis = System.currentTimeMillis()
             stationarySinceMillis = sessionStartMillis
+            stopsCount = 0
             etDeviceId.isEnabled = false
             refreshModeButtonsState(btnModeOffice, btnModeFamily)
 
@@ -391,10 +437,15 @@ class MainActivity : AppCompatActivity() {
 
             try {
                 val serviceIntent = Intent(this, LocationService::class.java).apply {
-                    putExtra("DEVICE_ID", rawId)
+                    putExtra(LocationService.EXTRA_DEVICE_ID, rawId)
+                    putExtra(LocationService.EXTRA_USER_ID, rawId)
+                    putExtra(LocationService.EXTRA_TOKEN, activeToken)
+                    putExtra(LocationService.EXTRA_MODE, selectedMode.lowercase(Locale.US))
+                    putExtra(LocationService.EXTRA_STEPS_FROM_OFFICE, 0)
+                    putExtra(LocationService.EXTRA_DWELL_MINUTES, 0)
+                    putExtra(LocationService.EXTRA_STATUS, "moving")
                     putExtra("SYSTEM_NAME", systemName)
                     putExtra("TRACKING_MODE", selectedMode)
-                    putExtra("TOKEN", activeToken)
                 }
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -417,7 +468,47 @@ class MainActivity : AppCompatActivity() {
         btnStopTracking.setOnClickListener {
             uiHandler.removeCallbacks(syncTicker)
             stopGpsUpdates()
+
+            val sessionUser = activeSessionId ?: etDeviceId.text.toString().trim()
+            val sessionTok = activeToken ?: ""
+            val dwellMins = if (stationarySinceMillis > 0L) {
+                ((System.currentTimeMillis() - stationarySinceMillis) / 60000L).coerceAtLeast(0L).toInt()
+            } else {
+                0
+            }
+
+            if (isSessionActive && sessionUser.isNotBlank()) {
+                val nowShort = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date())
+                val summary = JSONObject().apply {
+                    put("total_stops", stopsCount)
+                    put("dwell_minutes", dwellMins)
+                    put("last_lat", lastKnownLocation?.latitude ?: 0.0)
+                    put("last_lng", lastKnownLocation?.longitude ?: 0.0)
+                    put("returned_at", nowShort)
+                    put("status", "completed_auto_saved")
+                }
+                val returnPayload = JSONObject().apply {
+                    put("user_id", sessionUser)
+                    put("device_id", sessionUser)
+                    put("token", sessionTok)
+                    put("destination", "Main Depot / Return Zone")
+                    put("auto_disconnected", true)
+                    put("summary", summary)
+                }
+                Thread {
+                    DesktopSyncClient.postBookerReturn(returnPayload)
+                }.start()
+            }
+
             try {
+                val returnIntent = Intent(this, LocationService::class.java).apply {
+                    action = LocationService.ACTION_BOOKER_RETURN
+                    putExtra(LocationService.EXTRA_USER_ID, sessionUser)
+                    putExtra(LocationService.EXTRA_DEVICE_ID, sessionUser)
+                    putExtra(LocationService.EXTRA_TOKEN, sessionTok)
+                    putExtra(LocationService.EXTRA_DESTINATION, "Main Depot / Return Zone")
+                }
+                startService(returnIntent)
                 stopService(Intent(this, LocationService::class.java))
             } catch (_: Exception) {
             }
@@ -475,6 +566,8 @@ class MainActivity : AppCompatActivity() {
                     val prev = lastKnownLocation
                     if (prev != null && prev.distanceTo(location) > 15f) {
                         stationarySinceMillis = System.currentTimeMillis()
+                    } else if (prev != null) {
+                        stopsCount += 1
                     }
                     lastKnownLocation = location
                     if (isSessionActive && !isConnectingState) {
@@ -521,18 +614,30 @@ class MainActivity : AppCompatActivity() {
     private fun captureAndProcessTelemetry() {
         val currentMode = activeSessionMode ?: selectedMode
         val currentId = activeSessionId ?: ""
-        val nowTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+        val now = Date()
+        val nowTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(now)
+        val shortTime = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(now)
         val batteryPct = getBatteryPercentage()
+        val dwellMins = if (stationarySinceMillis > 0L) {
+            ((System.currentTimeMillis() - stationarySinceMillis) / 60000L).coerceAtLeast(0L).toInt()
+        } else {
+            0
+        }
 
         val record = JSONObject().apply {
-            put("mode", currentMode)
+            put("user_id", currentId)
+            put("device_id", currentId)
             put("deviceId", currentId)
+            put("mode", currentMode.lowercase(Locale.US))
             put("token", activeToken ?: "")
             put("lat", lastKnownLocation?.latitude ?: 0.0)
             put("lng", lastKnownLocation?.longitude ?: 0.0)
             put("bearing", lastKnownLocation?.bearing ?: 0f)
+            put("dwell_minutes", dwellMins)
+            put("status", if (dwellMins >= 2) "stopped" else "moving")
             put("battery", batteryPct)
             put("timestamp", nowTime)
+            put("sync_time", shortTime)
         }
 
         enqueueOfflineRecord(record)
@@ -577,6 +682,31 @@ class MainActivity : AppCompatActivity() {
                 applyVisualState()
             }
         }.start()
+    }
+
+    private fun registerNetworkMonitor() {
+        try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            connectivityManager = cm
+            val cb = object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    runOnUiThread {
+                        checkServerStatusAsync()
+                    }
+                }
+
+                override fun onLost(network: Network) {
+                    runOnUiThread {
+                        isServerConnected = false
+                        updateTelemetryText()
+                        applyVisualState()
+                    }
+                }
+            }
+            networkCallback = cb
+            cm.registerDefaultNetworkCallback(cb)
+        } catch (_: Exception) {
+        }
     }
 
     private fun getOfflineQueueArray(): JSONArray {
@@ -655,6 +785,49 @@ class MainActivity : AppCompatActivity() {
         } else {
             "Direction / Route: $gpsSummary | Dwell: ${dwellMins}m"
         }
+    }
+
+    private fun updateBatteryAndInfo(batteryView: TextView?, stayView: TextView?) {
+        val level = getBatteryPercentage()
+        val batteryText = if (level in 0..100) "$level%" else "--%"
+        batteryView?.text = "Battery: $batteryText | Stay Log: Ready"
+        stayView?.text = "Direction / Route: Standby"
+    }
+
+    private fun requireDeviceId(etDeviceId: EditText, systemName: String): Boolean {
+        val idText = etDeviceId.text.toString().trim()
+        if (idText.isEmpty()) {
+            etDeviceId.error = "Enter ID"
+            tvStatusDetail?.text = "$systemName ($selectedMode) | Please enter the ID"
+            tvTokenLogInfo?.text = "Token Audit: Enter ID first"
+            return false
+        }
+        etDeviceId.error = null
+        return true
+    }
+
+    private fun resolveDisplayLabel(rawId: String, mode: String): String {
+        val clean = rawId.trim()
+        return if (clean.isEmpty()) mode else "$clean ($mode)"
+    }
+
+    private fun generateLocalToken(rawId: String, mode: String): String {
+        val cleanId = rawId.uppercase(Locale.US).replace(Regex("[^A-Z0-9]"), "").take(10).ifEmpty { "USER" }
+        val modeTag = mode.uppercase(Locale.US).take(4)
+        val suffix = (1000..9999).random()
+        val mid = (System.currentTimeMillis() % 1000000).toString().padStart(6, '0')
+        return "SRK3-$cleanId-$modeTag-$mid-$suffix"
+    }
+
+    private fun setDisconnectedState(detailText: String, systemName: String) {
+        stopSpin3D()
+        stopRadarPulse()
+        moveIconToBottom()
+        ivRadarSignal?.visibility = View.INVISIBLE
+        statusBanner?.setBackgroundColor(Color.parseColor("#B71C1C"))
+        tvGpsStatus?.text = "GPS: DISCONNECTED ($selectedMode)"
+        tvStatusDetail?.text = detailText
+        tvTokenLogInfo?.text = "Token Audit: Ready ($systemName - $selectedMode)"
     }
 
     private fun requestRequiredPermissionsIfNeeded() {
@@ -848,7 +1021,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         radarPulseAnimator = AnimatorSet().apply {
-            interpolator = LinearInterpolator()
             playTogether(scaleX, scaleY, alpha)
             start()
         }
@@ -857,98 +1029,20 @@ class MainActivity : AppCompatActivity() {
     private fun stopRadarPulse() {
         radarPulseAnimator?.cancel()
         radarPulseAnimator = null
-        ivRadarSignal?.apply {
-            scaleX = 1f
-            scaleY = 1f
-            alpha = 0f
-        }
-    }
-
-    private fun registerNetworkMonitor() {
-        try {
-            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            connectivityManager = cm
-
-            val callback = object : ConnectivityManager.NetworkCallback() {
-                override fun onAvailable(network: Network) {
-                    runOnUiThread {
-                        checkServerStatusAsync()
-                    }
-                }
-
-                override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
-                    runOnUiThread {
-                        checkServerStatusAsync()
-                    }
-                }
-
-                override fun onLost(network: Network) {
-                    runOnUiThread {
-                        isServerConnected = false
-                        updateTelemetryText()
-                        applyVisualState()
-                    }
-                }
-            }
-            networkCallback = callback
-            cm.registerDefaultNetworkCallback(callback)
-        } catch (_: Exception) {
-        }
-    }
-
-    private fun requireDeviceId(etDeviceId: EditText, systemName: String): Boolean {
-        val id = etDeviceId.text.toString().trim()
-        if (id.isEmpty()) {
-            etDeviceId.error = "Required"
-            tvStatusDetail?.text = "$systemName ($selectedMode) | Please enter the ID"
-            return false
-        }
-        etDeviceId.error = null
-        return true
-    }
-
-    private fun resolveDisplayLabel(rawId: String, mode: String): String {
-        val clean = rawId.trim()
-        return if (clean.isEmpty()) mode else "$clean ($mode)"
-    }
-
-    private fun generateLocalToken(rawId: String, mode: String): String {
-        val prefix = if (mode == MODE_OFFICE) "OFF" else "HM"
-        val cleanId = rawId.replace(Regex("[^A-Za-z0-9]"), "").take(4).uppercase(Locale.US).ifEmpty { "ID" }
-        val randPart = (1000..9999).random()
-        return "$prefix-$cleanId-$randPart"
-    }
-
-    private fun setDisconnectedState(detailText: String, systemName: String) {
-        stopSpin3D()
-        stopRadarPulse()
-        moveIconToBottom()
-        ivRadarSignal?.visibility = View.INVISIBLE
-        statusBanner?.setBackgroundColor(Color.parseColor("#B71C1C"))
-        tvGpsStatus?.text = "GPS: DISCONNECTED"
-        tvStatusDetail?.text = detailText
-        tvSelectedMode?.text = "Mode: $selectedMode"
-        if (tvTokenLogInfo?.text.isNullOrBlank()) {
-            tvTokenLogInfo?.text = "$systemName ready"
-        }
-    }
-
-    private fun updateBatteryAndInfo(batteryView: TextView, stayView: TextView) {
-        val level = getBatteryPercentage()
-        val batteryText = if (level in 0..100) "$level%" else "--%"
-        batteryView.text = "Battery: $batteryText | Stay Log: Ready"
-        stayView.text = "Direction / Route: Waiting for session"
+        ivRadarSignal?.scaleX = 1f
+        ivRadarSignal?.scaleY = 1f
+        ivRadarSignal?.alpha = 0f
     }
 
     override fun onDestroy() {
         super.onDestroy()
         uiHandler.removeCallbacks(syncTicker)
         stopGpsUpdates()
-        stopSpin3D()
-        stopRadarPulse()
         try {
             networkCallback?.let { connectivityManager?.unregisterNetworkCallback(it) }
         } catch (_: Exception) {
         }
+        stopSpin3D()
+        stopRadarPulse()
     }
 }
