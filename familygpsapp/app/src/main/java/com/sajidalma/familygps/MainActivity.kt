@@ -50,10 +50,30 @@ class MainActivity : AppCompatActivity() {
         const val MODE_HOME = "Home"
         private const val PREFS_NAME = "srk_gps_offline_prefs"
         private const val KEY_OFFLINE_QUEUE = "offline_queue_json"
-        private const val DESKTOP_SYNC_URL = "http://192.168.1.4:8085/api/sync"
+        private const val DESKTOP_BASE_URL = "http://192.168.1.4:8085"
+        private const val DESKTOP_SYNC_URL = "$DESKTOP_BASE_URL/api/sync"
+        private const val DESKTOP_HEALTH_URL = "$DESKTOP_BASE_URL/health"
     }
 
     private object DesktopSyncClient {
+        fun isServerReachable(timeoutMs: Int = 2500): Boolean {
+            var conn: HttpURLConnection? = null
+            return try {
+                val url = URL(DESKTOP_HEALTH_URL)
+                conn = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = timeoutMs
+                    readTimeout = timeoutMs
+                }
+                val code = conn.responseCode
+                code in 200..299
+            } catch (_: Exception) {
+                false
+            } finally {
+                conn?.disconnect()
+            }
+        }
+
         fun postBatch(records: JSONArray, timeoutMs: Int = 6000): Boolean {
             if (records.length() == 0) return true
             var conn: HttpURLConnection? = null
@@ -103,7 +123,7 @@ class MainActivity : AppCompatActivity() {
     private var generatedToken: String = ""
     private val usedTokens = mutableSetOf<String>()
 
-    private var isInternetAvailable: Boolean = false
+    private var isServerConnected: Boolean = false
     private var isConnectingState: Boolean = false
 
     private var connectivityManager: ConnectivityManager? = null
@@ -197,9 +217,8 @@ class MainActivity : AppCompatActivity() {
         val btnStopTracking = findViewById<Button>(R.id.btnStopTracking)
 
         requestRequiredPermissionsIfNeeded()
-
-        isInternetAvailable = checkCurrentInternet()
         registerNetworkMonitor()
+        checkServerStatusAsync()
 
         tvReceivedToken.text = "Enter ID first to generate token"
         refreshModeButtonsState(btnModeOffice, btnModeFamily)
@@ -505,8 +524,6 @@ class MainActivity : AppCompatActivity() {
         val nowTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
         val batteryPct = getBatteryPercentage()
 
-        isInternetAvailable = checkCurrentInternet()
-
         val record = JSONObject().apply {
             put("mode", currentMode)
             put("deviceId", currentId)
@@ -519,22 +536,36 @@ class MainActivity : AppCompatActivity() {
         }
 
         enqueueOfflineRecord(record)
-
-        if (isInternetAvailable) {
-            flushOfflineQueueAsync(nowTime)
-        }
-
+        flushOfflineQueueAsync(nowTime)
         updateTelemetryText()
         applyVisualState()
     }
 
+    private fun checkServerStatusAsync() {
+        Thread {
+            val reachable = DesktopSyncClient.isServerReachable()
+            runOnUiThread {
+                isServerConnected = reachable
+                if (isSessionActive && reachable) {
+                    flushOfflineQueueAsync()
+                }
+                updateTelemetryText()
+                applyVisualState()
+            }
+        }.start()
+    }
+
     private fun flushOfflineQueueAsync(syncTimeLabel: String? = null) {
         val arr = getOfflineQueueArray()
-        if (arr.length() == 0) return
+        if (arr.length() == 0) {
+            checkServerStatusAsync()
+            return
+        }
 
         Thread {
             val success = DesktopSyncClient.postBatch(arr)
             runOnUiThread {
+                isServerConnected = success
                 if (success) {
                     val count = arr.length()
                     saveOfflineQueueArray(JSONArray())
@@ -727,7 +758,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         val queued = getQueuedCount()
-        if (!isInternetAvailable) {
+        if (!isServerConnected) {
             stopSpin3D()
             moveIconToHeader()
             ivRadarSignal?.visibility = View.INVISIBLE
@@ -744,7 +775,7 @@ class MainActivity : AppCompatActivity() {
 
             statusBanner?.setBackgroundColor(Color.parseColor("#2E7D32"))
             tvGpsStatus?.text = "GPS: CONNECTED & TRACKING ($currentMode)"
-            tvStatusDetail?.text = "$label | Live Signal Active"
+            tvStatusDetail?.text = "$label | Synced with Desktop"
         }
     }
 
@@ -833,17 +864,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun checkCurrentInternet(): Boolean {
-        return try {
-            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            val activeNetwork = cm.activeNetwork ?: return false
-            val caps = cm.getNetworkCapabilities(activeNetwork) ?: return false
-            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-        } catch (_: Exception) {
-            false
-        }
-    }
-
     private fun registerNetworkMonitor() {
         try {
             val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -852,31 +872,19 @@ class MainActivity : AppCompatActivity() {
             val callback = object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
                     runOnUiThread {
-                        isInternetAvailable = checkCurrentInternet()
-                        if (isSessionActive && isInternetAvailable) {
-                            flushOfflineQueueAsync()
-                        }
-                        updateTelemetryText()
-                        applyVisualState()
+                        checkServerStatusAsync()
                     }
                 }
 
                 override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
                     runOnUiThread {
-                        isInternetAvailable = networkCapabilities.hasCapability(
-                            NetworkCapabilities.NET_CAPABILITY_INTERNET
-                        )
-                        if (isSessionActive && isInternetAvailable) {
-                            flushOfflineQueueAsync()
-                        }
-                        updateTelemetryText()
-                        applyVisualState()
+                        checkServerStatusAsync()
                     }
                 }
 
                 override fun onLost(network: Network) {
                     runOnUiThread {
-                        isInternetAvailable = checkCurrentInternet()
+                        isServerConnected = false
                         updateTelemetryText()
                         applyVisualState()
                     }
