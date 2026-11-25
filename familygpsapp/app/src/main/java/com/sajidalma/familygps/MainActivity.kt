@@ -15,7 +15,6 @@ import android.location.LocationManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
-import android.net.NetworkRequest
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
@@ -35,10 +34,14 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.random.Random
 
 class MainActivity : AppCompatActivity() {
 
@@ -47,6 +50,47 @@ class MainActivity : AppCompatActivity() {
         const val MODE_HOME = "Home"
         private const val PREFS_NAME = "srk_gps_offline_prefs"
         private const val KEY_OFFLINE_QUEUE = "offline_queue_json"
+        private const val DESKTOP_SYNC_URL = "http://192.168.1.4:8085/api/sync"
+    }
+
+    private object DesktopSyncClient {
+        fun postBatch(records: JSONArray, timeoutMs: Int = 6000): Boolean {
+            if (records.length() == 0) return true
+            var conn: HttpURLConnection? = null
+            return try {
+                val url = URL(DESKTOP_SYNC_URL)
+                conn = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = timeoutMs
+                    readTimeout = timeoutMs
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                    setRequestProperty("Accept", "application/json")
+                }
+
+                OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { writer ->
+                    writer.write(records.toString())
+                    writer.flush()
+                }
+
+                val code = conn.responseCode
+                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                val body = stream?.let { input ->
+                    BufferedReader(InputStreamReader(input, Charsets.UTF_8)).use { it.readText() }
+                }.orEmpty()
+
+                if (code in 200..299) {
+                    val json = JSONObject(body)
+                    json.optString("status") == "synced"
+                } else {
+                    false
+                }
+            } catch (_: Exception) {
+                false
+            } finally {
+                conn?.disconnect()
+            }
+        }
     }
 
     private var selectedMode: String = MODE_OFFICE
@@ -474,19 +518,34 @@ class MainActivity : AppCompatActivity() {
             put("timestamp", nowTime)
         }
 
+        enqueueOfflineRecord(record)
+
         if (isInternetAvailable) {
-            val flushed = flushOfflineQueue()
-            tvLastSync?.text = if (flushed > 0) {
-                "Last Sync: $nowTime ($flushed synced)"
-            } else {
-                "Last Sync: $nowTime"
-            }
-        } else {
-            enqueueOfflineRecord(record)
+            flushOfflineQueueAsync(nowTime)
         }
 
         updateTelemetryText()
         applyVisualState()
+    }
+
+    private fun flushOfflineQueueAsync(syncTimeLabel: String? = null) {
+        val arr = getOfflineQueueArray()
+        if (arr.length() == 0) return
+
+        Thread {
+            val success = DesktopSyncClient.postBatch(arr)
+            runOnUiThread {
+                if (success) {
+                    val count = arr.length()
+                    saveOfflineQueueArray(JSONArray())
+                    val timeText = syncTimeLabel
+                        ?: SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+                    tvLastSync?.text = "Last Sync: $timeText ($count synced)"
+                }
+                updateTelemetryText()
+                applyVisualState()
+            }
+        }.start()
     }
 
     private fun getOfflineQueueArray(): JSONArray {
@@ -511,15 +570,6 @@ class MainActivity : AppCompatActivity() {
         val arr = getOfflineQueueArray()
         arr.put(record)
         saveOfflineQueueArray(arr)
-    }
-
-    private fun flushOfflineQueue(): Int {
-        val arr = getOfflineQueueArray()
-        val count = arr.length()
-        if (count > 0) {
-            saveOfflineQueueArray(JSONArray())
-        }
-        return count
     }
 
     private fun getQueuedCount(): Int = getOfflineQueueArray().length()
@@ -569,7 +619,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         tvBatteryInfo?.text = "Battery: $batteryText | Stay Log: Active"
-        tvStayAndDirection?.text = if (!isInternetAvailable && queued > 0) {
+        tvStayAndDirection?.text = if (queued > 0) {
             "Direction / Route: $gpsSummary | Queued: $queued | Dwell: ${dwellMins}m"
         } else {
             "Direction / Route: $gpsSummary | Dwell: ${dwellMins}m"
@@ -803,15 +853,11 @@ class MainActivity : AppCompatActivity() {
                 override fun onAvailable(network: Network) {
                     runOnUiThread {
                         isInternetAvailable = checkCurrentInternet()
-                        if (isSessionActive) {
-                            val flushed = flushOfflineQueue()
-                            if (flushed > 0) {
-                                val syncTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-                                tvLastSync?.text = "Last Sync: $syncTime ($flushed synced)"
-                            }
-                            updateTelemetryText()
-                            applyVisualState()
+                        if (isSessionActive && isInternetAvailable) {
+                            flushOfflineQueueAsync()
                         }
+                        updateTelemetryText()
+                        applyVisualState()
                     }
                 }
 
@@ -820,123 +866,81 @@ class MainActivity : AppCompatActivity() {
                         isInternetAvailable = networkCapabilities.hasCapability(
                             NetworkCapabilities.NET_CAPABILITY_INTERNET
                         )
-                        if (isSessionActive) {
-                            if (isInternetAvailable) {
-                                val flushed = flushOfflineQueue()
-                                if (flushed > 0) {
-                                    val syncTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-                                    tvLastSync?.text = "Last Sync: $syncTime ($flushed synced)"
-                                }
-                            }
-                            updateTelemetryText()
-                            applyVisualState()
+                        if (isSessionActive && isInternetAvailable) {
+                            flushOfflineQueueAsync()
                         }
+                        updateTelemetryText()
+                        applyVisualState()
                     }
                 }
 
                 override fun onLost(network: Network) {
                     runOnUiThread {
                         isInternetAvailable = checkCurrentInternet()
-                        if (isSessionActive) {
-                            updateTelemetryText()
-                            applyVisualState()
-                        }
+                        updateTelemetryText()
+                        applyVisualState()
                     }
                 }
             }
-
             networkCallback = callback
-            val request = NetworkRequest.Builder()
-                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                .build()
-            cm.registerNetworkCallback(request, callback)
+            cm.registerDefaultNetworkCallback(callback)
         } catch (_: Exception) {
         }
     }
 
     private fun requireDeviceId(etDeviceId: EditText, systemName: String): Boolean {
-        val rawId = etDeviceId.text.toString().trim()
-        if (rawId.isEmpty()) {
-            etDeviceId.error = "Please enter the ID"
-            etDeviceId.requestFocus()
+        val id = etDeviceId.text.toString().trim()
+        if (id.isEmpty()) {
+            etDeviceId.error = "Required"
             tvStatusDetail?.text = "$systemName ($selectedMode) | Please enter the ID"
-            tvTokenLogInfo?.text = "Token Audit: Device / User ID is required"
             return false
         }
         etDeviceId.error = null
         return true
     }
 
-    private fun resolveDisplayLabel(rawInput: String, mode: String): String {
-        val cleanedInput = rawInput.trim()
-        val personName = cleanedInput
-            .replace(Regex("\\b(home|family|office)\\b", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("\\s+"), " ")
-            .trim()
-            .ifEmpty { cleanedInput }
-
-        return "$personName - $mode"
+    private fun resolveDisplayLabel(rawId: String, mode: String): String {
+        val clean = rawId.trim()
+        return if (clean.isEmpty()) mode else "$clean ($mode)"
     }
 
-    private fun generateLocalToken(rawUserId: String, mode: String): String {
-        val brandCode = getString(R.string.app_name)
-            .replace(Regex("[^A-Za-z0-9]"), "")
-            .take(4)
-            .uppercase(Locale.getDefault())
-            .ifEmpty { "GPS" }
-
-        val modeTag = mode.take(3).uppercase(Locale.getDefault())
-
-        val cleanId = rawUserId.trim()
-            .replace(Regex("[^A-Za-z0-9]"), "")
-            .take(8)
-            .uppercase(Locale.getDefault())
-            .ifEmpty { "USERID" }
-
-        val timePart = SimpleDateFormat("HHmmss", Locale.getDefault()).format(Date())
-        var candidate: String
-        do {
-            val randomCode = Random.nextInt(1000, 9999)
-            candidate = "$brandCode-$modeTag-$cleanId-$timePart-$randomCode"
-        } while (usedTokens.contains(candidate))
-
-        return candidate
+    private fun generateLocalToken(rawId: String, mode: String): String {
+        val prefix = if (mode == MODE_OFFICE) "OFF" else "HM"
+        val cleanId = rawId.replace(Regex("[^A-Za-z0-9]"), "").take(4).uppercase(Locale.US).ifEmpty { "ID" }
+        val randPart = (1000..9999).random()
+        return "$prefix-$cleanId-$randPart"
     }
 
     private fun setDisconnectedState(detailText: String, systemName: String) {
-        statusBanner?.setBackgroundColor(Color.parseColor("#D32F2F"))
+        stopSpin3D()
+        stopRadarPulse()
+        moveIconToBottom()
+        ivRadarSignal?.visibility = View.INVISIBLE
+        statusBanner?.setBackgroundColor(Color.parseColor("#B71C1C"))
         tvGpsStatus?.text = "GPS: DISCONNECTED"
         tvStatusDetail?.text = detailText
-        refreshModeButtonsState(
-            findViewById(R.id.btnModeOffice),
-            findViewById(R.id.btnModeFamily)
-        )
-        tvTokenLogInfo?.text = "Token Audit: Ready for fresh $systemName ($selectedMode) token"
-        tvStayAndDirection?.text = "Direction / Route: Stopped | Dwell Time: 0m"
-        applyVisualState()
+        tvSelectedMode?.text = "Mode: $selectedMode"
+        if (tvTokenLogInfo?.text.isNullOrBlank()) {
+            tvTokenLogInfo?.text = "$systemName ready"
+        }
     }
 
-    private fun updateBatteryAndInfo(tvBattery: TextView, tvStay: TextView) {
-        val bm = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
-        val level = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+    private fun updateBatteryAndInfo(batteryView: TextView, stayView: TextView) {
+        val level = getBatteryPercentage()
         val batteryText = if (level in 0..100) "$level%" else "--%"
-        val modeName = activeSessionMode ?: selectedMode
-        tvBattery.text = "Battery: $batteryText | Stay Log: Active"
-        tvStay.text = "Direction / Route: Monitoring ($modeName) | Dwell: 0m"
+        batteryView.text = "Battery: $batteryText | Stay Log: Ready"
+        stayView.text = "Direction / Route: Waiting for session"
     }
 
     override fun onDestroy() {
+        super.onDestroy()
         uiHandler.removeCallbacks(syncTicker)
-        uiHandler.removeCallbacksAndMessages(null)
         stopGpsUpdates()
         stopSpin3D()
         stopRadarPulse()
-        networkCallback?.let { cb ->
-            try {
-                connectivityManager?.unregisterNetworkCallback(cb)
-            } catch (_: Exception) {
-            }
+        try {
+            networkCallback?.let { connectivityManager?.unregisterNetworkCallback(it) }
+        } catch (_: Exception) {
         }
-        super.onDestroy()
     }
 }
