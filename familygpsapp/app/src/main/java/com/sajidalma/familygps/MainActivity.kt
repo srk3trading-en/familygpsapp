@@ -14,7 +14,6 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.net.ConnectivityManager
 import android.net.Network
-import android.net.NetworkCapabilities
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
@@ -54,6 +53,7 @@ class MainActivity : AppCompatActivity() {
         private const val DESKTOP_SYNC_URL = "$DESKTOP_BASE_URL/api/sync"
         private const val DESKTOP_BOOKER_RETURN_URL = "$DESKTOP_BASE_URL/api/booker-return"
         private const val DESKTOP_HEALTH_URL = "$DESKTOP_BASE_URL/health"
+        private const val SYNC_BATCH_SIZE = 25
     }
 
     private object DesktopSyncClient {
@@ -87,7 +87,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        fun postBatch(records: JSONArray, timeoutMs: Int = 6000): Boolean {
+        fun postBatch(records: JSONArray, timeoutMs: Int = 8000): Boolean {
             if (records.length() == 0) return true
             var conn: HttpURLConnection? = null
             return try {
@@ -99,6 +99,7 @@ class MainActivity : AppCompatActivity() {
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json; charset=utf-8")
                     setRequestProperty("Accept", "application/json")
+                    setRequestProperty("Connection", "close")
                 }
 
                 OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { writer ->
@@ -140,6 +141,7 @@ class MainActivity : AppCompatActivity() {
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json; charset=utf-8")
                     setRequestProperty("Accept", "application/json")
+                    setRequestProperty("Connection", "close")
                 }
 
                 OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { writer ->
@@ -667,19 +669,32 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        val limit = minOf(SYNC_BATCH_SIZE, arr.length())
+        val batch = JSONArray()
+        for (i in 0 until limit) {
+            batch.put(arr.get(i))
+        }
+
+        val remaining = JSONArray()
+        for (i in limit until arr.length()) {
+            remaining.put(arr.get(i))
+        }
+
         Thread {
-            val success = DesktopSyncClient.postBatch(arr)
+            val success = DesktopSyncClient.postBatch(batch)
             runOnUiThread {
                 isServerConnected = success
                 if (success) {
-                    val count = arr.length()
-                    saveOfflineQueueArray(JSONArray())
+                    saveOfflineQueueArray(remaining)
                     val timeText = syncTimeLabel
                         ?: SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-                    tvLastSync?.text = "Last Sync: $timeText ($count synced)"
+                    tvLastSync?.text = "Last Sync: $timeText ($limit synced)"
                 }
                 updateTelemetryText()
                 applyVisualState()
+                if (success && remaining.length() > 0) {
+                    uiHandler.postDelayed({ flushOfflineQueueAsync(syncTimeLabel) }, 300L)
+                }
             }
         }.start()
     }
@@ -885,7 +900,6 @@ class MainActivity : AppCompatActivity() {
             tvSelectedMode?.text = "Mode: $selectedMode"
             tvTokenLogInfo?.text = "Switched to $selectedMode mode. Enter ID & token."
         }
-
         refreshModeButtonsState(btnModeOffice, btnModeFamily)
     }
 
@@ -893,10 +907,8 @@ class MainActivity : AppCompatActivity() {
         val lockSwitch = isSessionActive && activeSessionMode != null
         btnModeOffice?.isEnabled = !lockSwitch || activeSessionMode == MODE_OFFICE
         btnModeFamily?.isEnabled = !lockSwitch || activeSessionMode == MODE_HOME
-
         btnModeOffice?.alpha = if (btnModeOffice?.isEnabled == true) 1.0f else 0.4f
         btnModeFamily?.alpha = if (btnModeFamily?.isEnabled == true) 1.0f else 0.4f
-
         val modeLabel = if (lockSwitch) {
             "Mode: $activeSessionMode (LOCKED)"
         } else {
@@ -923,7 +935,6 @@ class MainActivity : AppCompatActivity() {
             startSpin3D()
             stopRadarPulse()
             ivRadarSignal?.visibility = View.INVISIBLE
-
             statusBanner?.setBackgroundColor(Color.parseColor("#EF6C00"))
             tvGpsStatus?.text = "GPS: CONNECTING ($currentMode)..."
             tvStatusDetail?.text = "$label | Establishing signal..."
@@ -936,7 +947,6 @@ class MainActivity : AppCompatActivity() {
             moveIconToHeader()
             ivRadarSignal?.visibility = View.INVISIBLE
             stopRadarPulse()
-
             statusBanner?.setBackgroundColor(Color.parseColor("#37474F"))
             tvGpsStatus?.text = "GPS: OFFLINE BUFFER ($currentMode)"
             tvStatusDetail?.text = "$label | Saving locally ($queued queued)"
@@ -945,7 +955,6 @@ class MainActivity : AppCompatActivity() {
             moveIconToHeader()
             ivRadarSignal?.visibility = View.VISIBLE
             startRadarPulse()
-
             statusBanner?.setBackgroundColor(Color.parseColor("#2E7D32"))
             tvGpsStatus?.text = "GPS: CONNECTED & TRACKING ($currentMode)"
             tvStatusDetail?.text = "$label | Synced with Desktop"
@@ -978,7 +987,6 @@ class MainActivity : AppCompatActivity() {
         } else {
             0f
         }
-
         target.animate()
             .translationY(targetTranslationY)
             .setDuration(400L)
@@ -999,11 +1007,9 @@ class MainActivity : AppCompatActivity() {
         val radar = ivRadarSignal ?: return
         if (radarPulseAnimator?.isRunning == true) return
         radarPulseAnimator?.cancel()
-
         radar.scaleX = 0.7f
         radar.scaleY = 0.7f
         radar.alpha = 0.9f
-
         val scaleX = ObjectAnimator.ofFloat(radar, View.SCALE_X, 0.7f, 1.6f).apply {
             duration = 1100L
             repeatCount = ValueAnimator.INFINITE
@@ -1019,7 +1025,6 @@ class MainActivity : AppCompatActivity() {
             repeatCount = ValueAnimator.INFINITE
             repeatMode = ValueAnimator.RESTART
         }
-
         radarPulseAnimator = AnimatorSet().apply {
             playTogether(scaleX, scaleY, alpha)
             start()
